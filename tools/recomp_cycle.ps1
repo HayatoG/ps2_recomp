@@ -28,6 +28,7 @@ param(
     [string] $BuildTree = 'work\ps2recomp_game',
     [string[]] $TomlOptions = @('low_memory_mode=true', 'output_worker_threads=8'),
     [string[]] $AddStubs = @(),   # ex.: 'ret0@0x002D3AD8' (liga a funcao nesse endereco a um handler do runtime)
+    [switch] $PointerScan,        # cria funcoes nos alvos de ponteiros em dados/constantes (CreateFunctionsFromPointers.java)
     [switch] $SkipBuild
 )
 
@@ -50,6 +51,7 @@ function Step($name, [scriptblock] $body) {
 # 1. Ghidra headless: simbolos + alvos ausentes + exportacao
 $scripts = @()
 foreach ($csv in $Symbols) { $scripts += , @('ApplySymbolsCsv.java', $csv, 'low') }
+if ($PointerScan) { $scripts += , @('CreateFunctionsFromPointers.java') }
 if ($MissingLog) { $scripts += , @('CreateFunctionsAt.java', $MissingLog) }
 $tomlPath = "$gameRel\work\recomp\ghost.toml"
 $csvPath = "$gameRel\work\recomp\ghost_functions.csv"
