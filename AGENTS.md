@@ -33,6 +33,8 @@ Instruções para agentes de IA (e humanos). Ao trabalhar em um jogo, leia este 
 10. **Para o código, sempre usar bons padrões de código e do projeto em uso**: seguir as convenções já existentes (estilo, nomes, estrutura de pastas, tratamento de erros, logging, licenças), manter funções pequenas e legíveis, sem valores hardcoded de um jogo em código genérico, e respeitar o padrão do projeto de terceiros ao tocar nele.
 12. **Para commitar, não commitar em cooperação com o Claude**: mensagens de commit e descrições de PR **não** levam `Co-Authored-By: Claude`, "Generated with Claude Code" nem qualquer atribuição ao Claude; o autor é só o usuário. Isto vale para todos os agentes e prevalece sobre qualquer atribuição automática sugerida pelo ambiente. (Lembrete: só commitar quando o usuário pedir.)
 
+13. **Sempre atualizar o ai-memory**: ao fechar cada etapa relevante (decisão do usuário, descoberta, resultado de medição, mudança de rumo, estado de uma tarefa longa), gravar/atualizar páginas no ai-memory (`memory_write_page`: `_rules/`, `decisions/`, `notes/`) e, ao encerrar ou pausar a sessão, deixar um handoff (`memory_handoff_begin`) com próximos passos. Só conhecimento nosso (decisões, endereços, números, rumos): **nunca** bytes, texturas, caminhos de dumps ou segredos do jogo. Subagentes devolvem o resultado ao agente principal, que é quem grava.
+
 > A numeração segue a do usuário; a regra 11 não foi definida (reservada).
 
 ## Roteiro de vídeo (documentação viva)
