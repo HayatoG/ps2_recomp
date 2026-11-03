@@ -125,5 +125,5 @@ são o grosso; como o FMV nem foi tratado ainda, decidir C junto com o trabalho 
 3. Camada de caminhos por SO e `launcher.cfg` (gerado e comentado).
 4. Entradas BIN/CUE e CHD.
 5. Decidir a linguagem final e portar o núcleo; GUI com gamepad.
-6. Perfil Steam Deck, empacotamento e assinatura (ver `distribution.md`).
+6. Integração com a Steam local (`steam-add`, arte, perfil Deck; ver `steam-library.md`), empacotamento e assinatura (`distribution.md`).
 7. Avaliar VFS direto do ISO/CHD no runtime.

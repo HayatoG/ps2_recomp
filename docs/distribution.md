@@ -1,5 +1,7 @@
 # Distribuição: Steam, GOG e Steam Deck (preparação)
 
+> **Atualização:** o usuário decidiu **não publicar** na Steam nem na GOG. O foco passou a ser usar o cliente da Steam como lançador local (ver `steam-library.md`). As seções abaixo servem como requisitos de Deck, caminhos por SO, assinatura e riscos, caso a decisão mude.
+
 Status: **preparação**, nada publicado. Os repositórios continuam privados (regra 3) e
 publicar numa loja é decisão posterior do usuário. Isto não é aconselhamento jurídico (ver
 `LEGAL.md`). Itens "não confirmado" não foram verificados em fonte primária.
