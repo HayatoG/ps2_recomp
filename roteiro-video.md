@@ -229,6 +229,11 @@ Medir só o primeiro engana: você pode apresentar 200 imagens por segundo e o j
 2. *O jogo passou do ponto e mostrou a abertura* — um fundo hexagonal animado, com ruído ciano e laranja. `[TELA]` captura da cena.
 3. **Desempenho medido cena por cena (e por que é importante):** boot e menu ~53% do tempo real; telas intermediárias 61–68%; **a cena hexagonal, 46%** (22,9 Hz de 50). Mesmo o jogo "rodando", a velocidade depende do que está na tela — preencher a tela inteira com uma textura misturada em software é a operação mais cara do rasterizador. *Lição: um benchmark só no menu esconderia o pior caso.*
 
+**Fechamento da primeira sessão de trabalho (o final feliz parcial).**
+1. **A tela de título apareceu**: "GHOST IN THE SHELL — STAND ALONE COMPLEX", com os créditos, desenhada pelo port a partir do disco do próprio dono do jogo; depois a abertura hexagonal. `[TELA]` as duas capturas. Tudo isso **guiado por um controle virtual programado**, sem ninguém apertar botão.
+2. **Um experimento que deu errado, e por que mostrar isso no vídeo:** ligamos a otimização de programa inteiro (LTCG) só na biblioteca do runtime, esperando uns 10%. Compilou, a imagem saiu idêntica, mas o ganho foi **zero** (34,9 e 34,3 Hz contra 34,6). Revertemos. *Lição: um resultado negativo medido é conhecimento; "deve ajudar" não é.*
+3. **Balanço honesto:** o jogo **roda e é jogável até a abertura**; o menu está em ~70–80% do tempo real (era 38%), e a cena mais pesada em 46%. Falta: o rasterizador ainda é o gargalo; o som não foi tratado; e o jogo de verdade (depois da abertura) não foi medido. **O que mais ajudou nas 6 horas** não foi uma ideia genial, e sim **um ciclo curto de "mudar → rodar → olhar a imagem → medir"** e ferramentas de diagnóstico baratas escritas na hora.
+
 **Metas:** 30 FPS (o mínimo jogável), 60 FPS (o ideal) e "ilimitado" (para medir o custo bruto). O limite virou configurável (`--fps 30|60|0`).
 **Como vamos otimizar (ordem):** 1) medir (baseline); 2) achar o gargalo com perfilador; 3) corrigir o maior; 4) medir de novo. *Nunca otimizar o que não foi medido.*
 **Resultado:** `[PREENCHER — FPS medido, gargalos, o que ajudou]`.
