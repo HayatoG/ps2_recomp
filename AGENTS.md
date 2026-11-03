@@ -1,4 +1,6 @@
-# AGENTS.md — ps2decomp (base)
+# AGENTS.md — ps2_recomp (base)
+
+> Repositórios (privados, conta `HayatoG`): base genérica = `ps2_recomp` (pasta local `ps2decomp`); cada jogo em repositório próprio (ex.: `ghost_pc`, ignorado pelo repo da base). Regra 12: commits sem atribuição ao Claude.
 
 Base de ferramentas, regras e método para decompilar/portar jogos de **PS2 para PC**. A raiz **não contém nenhum jogo**: cada jogo vive em seu próprio diretório (`ghost_pc/`, e outros que o usuário quiser adicionar), com seu próprio `AGENTS.md`.
 

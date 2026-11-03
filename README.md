@@ -1,4 +1,6 @@
-# ps2decomp
+# ps2_recomp
+
+> Repositório `HayatoG/ps2_recomp` (a pasta local se chama `ps2decomp`). Não confundir com o **PS2Recomp** de terceiros (ran-j, GPL-3.0), que usamos como ferramenta em `third_party/`.
 
 Base genérica de ferramentas, regras e método para **decompilar e portar jogos de PS2 para PC** (recompilação estática do MIPS R5900 + runtime). Cada jogo vive em **seu próprio repositório** dentro de uma pasta com o mesmo nome (ex.: `ghost_pc/`, que não é versionada aqui).
 
