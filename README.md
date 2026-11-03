@@ -23,3 +23,7 @@ Base genérica de ferramentas, regras e método para **decompilar e portar jogos
 ## Licenças e terceiros
 - O código gerado e o runtime derivam do **PS2Recomp** (GPL-3.0), clonado em `third_party/` (não versionado). Os patches ficam no repositório de cada jogo.
 - Ferramentas usadas: Ghidra, `ghidra-emotionengine-reloaded` (Apache-2.0), radare2, entre outras listadas em `docs/tools.md`.
+
+## Licença
+
+GPL-3.0 (ver `LICENSE`), pois o runtime e os patches derivam do PS2Recomp. Direitos autorais do jogo ficam com os titulares; nada do jogo é versionado. Detalhes e checklist de publicação em `docs/LEGAL.md`.
