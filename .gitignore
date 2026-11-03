@@ -1,0 +1,50 @@
+﻿# === Base ps2decomp: vale para a raiz e para QUALQUER jogo (ghost_pc/, outros_jogos/) ===
+
+# --- Cada jogo e um repositorio PROPRIO (com .gitignore proprio); a raiz so versiona a base generica ---
+/ghost_pc/
+
+# --- Conteúdo com direitos autorais / dumps do usuário (nunca commitar) ---
+/refs.txt
+*.iso
+*.bin
+*.img
+*.elf
+*.irx
+*.ico
+*.sdt
+*.pss
+*.pva
+*.sbv
+*.vag
+*.adx
+*.tm2
+*.tim
+*.dat
+**/dump/
+**/work/
+
+# --- Intermediários e saídas ---
+**/build/
+**/out/
+**/extracted/
+**/ghidra_project/
+*.gpr
+*.rep/
+*.lock
+*.lock~
+
+# --- Logs (gerados localmente; exportáveis, mas fora do git) ---
+**/logs/*
+!**/logs/.gitkeep
+
+# --- Python / editores / SO ---
+__pycache__/
+*.pyc
+.venv/
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# --- Codigo de terceiros clonado para estudo/spike (GPL etc.; nunca commitar) ---
+/third_party/
