@@ -13,6 +13,15 @@ struct Raw {
     extract: RawExtract,
     #[serde(default)]
     run: RawRun,
+    #[serde(default)]
+    art: RawArt,
+}
+
+/// `[art]`: so como a janela mostra a arte local do usuario (`<jogo>/artwork/`).
+#[derive(Deserialize, Default)]
+struct RawArt {
+    /// Ponto da capa (x, y em 0..1) mantido no centro da faixa esquerda.
+    focus: Option<[f32; 2]>,
 }
 
 #[derive(Deserialize)]
@@ -75,6 +84,8 @@ pub struct GameConfig {
     pub run_executable: Option<PathBuf>,
     pub run_args: Vec<String>,
     pub run_env: BTreeMap<String, String>,
+    /// Foco do corte da arte na janela (padrao: centro, um pouco acima).
+    pub art_focus: [f32; 2],
 }
 
 impl GameConfig {
@@ -101,6 +112,7 @@ impl GameConfig {
             run_executable: raw.run.executable.map(|e| game_dir.join(e)),
             run_args: raw.run.args,
             run_env: raw.run.env,
+            art_focus: raw.art.focus.map(|[x, y]| [x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)]).unwrap_or([0.5, 0.45]),
             serial,
         })
     }

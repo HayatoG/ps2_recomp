@@ -7,3 +7,6 @@ pub mod fsx;
 pub mod iso;
 pub mod log;
 pub mod run;
+pub mod settings;
+#[cfg(feature = "gui")]
+pub mod gui;

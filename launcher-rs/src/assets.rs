@@ -81,7 +81,20 @@ fn target(work: &Path, rel: &str) -> PathBuf {
     rel.split('/').fold(work.to_path_buf(), |p, part| p.join(part))
 }
 
+/// Andamento da extracao: bytes copiados/total e o arquivo atual.
+#[derive(Debug, Clone, Default)]
+pub struct Progress {
+    pub done: u64,
+    pub total: u64,
+    pub file: String,
+}
+
 pub fn extract(cfg: &GameConfig, iso_path: &Path, force: bool) -> Result<()> {
+    extract_with(cfg, iso_path, force, &mut |_| {})
+}
+
+/// [`extract`] avisando o andamento a cada bloco copiado (a GUI mostra a barra de progresso).
+pub fn extract_with(cfg: &GameConfig, iso_path: &Path, force: bool, progress: &mut dyn FnMut(&Progress)) -> Result<()> {
     let mut iso = Iso::open(iso_path)?;
     let items = plan(&mut iso, &cfg.extract_files)?;
     std::fs::create_dir_all(&cfg.work_dir)?;
@@ -123,6 +136,7 @@ pub fn extract(cfg: &GameConfig, iso_path: &Path, force: bool) -> Result<()> {
 
     info!("extraindo {} arquivo(s), {} MiB, para {}", todo.len(), need >> 20, cfg.work_dir.display());
     let mut done = 0u64;
+    let mut state = Progress { done: 0, total: need, file: String::new() };
     for (rel, entry) in todo {
         let dest = target(&cfg.work_dir, rel);
         if let Some(parent) = dest.parent() {
@@ -130,11 +144,15 @@ pub fn extract(cfg: &GameConfig, iso_path: &Path, force: bool) -> Result<()> {
         }
         let part = dest.with_file_name(format!("{}.part", dest.file_name().unwrap().to_string_lossy()));
         let mut hasher = Sha256::new();
+        state.file = rel.clone();
+        progress(&state);
         {
             let mut w = BufWriter::with_capacity(1 << 20, File::create(&part)?);
             iso.copy_to(entry, &mut |chunk| {
                 hasher.update(chunk);
                 w.write_all(chunk)?;
+                state.done += chunk.len() as u64;
+                progress(&state);
                 Ok(())
             })?;
             w.flush()?;
@@ -147,6 +165,43 @@ pub fn extract(cfg: &GameConfig, iso_path: &Path, force: bool) -> Result<()> {
         manifest.save(&cfg.work_dir)?; // salva a cada arquivo: permite retomar
     }
     Ok(())
+}
+
+/// Estado dos dados extraidos, pelo tamanho (sem ler o conteudo).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LocalStatus {
+    pub present: usize,
+    pub total: usize,
+    pub bytes_present: u64,
+    pub bytes_total: u64,
+    /// Espaco livre no volume da pasta de trabalho (ou do jogo, se ela nao existir).
+    pub free: Option<u64>,
+}
+
+impl LocalStatus {
+    pub fn complete(&self) -> bool {
+        self.total > 0 && self.present == self.total
+    }
+}
+
+/// Confere `[[dump.file]]` (ou, sem a tabela, o manifesto) contra a pasta de trabalho.
+pub fn local_status(cfg: &GameConfig) -> LocalStatus {
+    let known: Vec<(String, u64)> = if cfg.dump_files.is_empty() {
+        Manifest::load(&cfg.work_dir).files.into_iter().map(|f| (f.path, f.size)).collect()
+    } else {
+        cfg.dump_files.iter().map(|f| (f.name.clone(), f.size)).collect()
+    };
+    let mut st = LocalStatus { total: known.len(), ..Default::default() };
+    for (rel, size) in known {
+        st.bytes_total += size;
+        if std::fs::metadata(target(&cfg.work_dir, &rel)).map(|m| m.len() == size).unwrap_or(false) {
+            st.present += 1;
+            st.bytes_present += size;
+        }
+    }
+    let probe = if cfg.work_dir.is_dir() { cfg.work_dir.as_path() } else { cfg.root.as_path() };
+    st.free = fsx::free_space(probe);
+    st
 }
 
 /// `verify --deep`: rehash de tudo que esta no manifesto; preenche hashes adotados.

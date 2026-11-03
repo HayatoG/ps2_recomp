@@ -123,8 +123,8 @@ são o grosso; como o FMV nem foi tratado ainda, decidir C junto com o trabalho 
 ## 4. Etapas
 1. ~~Tabela de edições + `verify` rápido/profundo + recusa amigável~~ **feito em `launcher-rs/`** (`[[dump.file]]`, `verify`, `verify --deep`, `hashes`).
 2. ~~Extração atômica com manifesto, espaço livre e retomada~~ **feito** (`.part`, manifesto, checagem de espaço; retomada por arquivo).
-3. Camada de caminhos por SO e `launcher.cfg` (gerado e comentado).
+3. Camada de caminhos por SO e `launcher.cfg` (gerado e comentado). **`launcher.cfg` feito** (`launcher-rs/src/settings.rs`, lido pelo CLI e pela janela; flag > cfg > padrao); caminhos por SO pendentes.
 4. Entradas BIN/CUE e CHD.
-5. Decidir a linguagem final e portar o núcleo; GUI com gamepad.
+5. Decidir a linguagem final e portar o núcleo; GUI com gamepad. **Rust decidido; janela `ps2launch-gui` feita** (egui/glow, feature `gui`, abas Jogar/Imagem/Controles, gilrs, `--check`/`--no-window`/`--settings`). Falta testar com controle real e no Deck.
 6. Integração com a Steam local (`steam-add`, arte, perfil Deck; ver `steam-library.md`), empacotamento e assinatura (`distribution.md`).
 7. Avaliar VFS direto do ISO/CHD no runtime.

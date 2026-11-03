@@ -1,5 +1,6 @@
 //! CLI do launcher: `ps2launch <info|verify|extract|run> [--game DIR] [--iso ARQ] [opcoes]`.
-use ps2launch::{assets, config::GameConfig, dump, err, error::Result, error, info, log, run};
+use ps2launch::settings::{self, Settings};
+use ps2launch::{assets, config::GameConfig, dump, err, error, error::Result, info, log, run, warn};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -27,10 +28,16 @@ OPCOES:
     --fps-log CSV     grava o FPS por segundo
     --shot-dir DIR    pasta dos PNG do comando 'shot' do pad virtual
     --missing-log ARQ registra alvos de desvio sem funcao gerada
+    --renderer R      desenho: cpu (padrao) ou d3d11 (experimental)
+    --vsync           sincronia vertical do d3d11
     --heartbeat       uma linha por segundo com o estado do guest (diagnostico)
     --peek 0xA,0xB    enderecos do guest no heartbeat
     --timeout S       encerra o jogo apos S segundos
     -h, --help        esta ajuda
+
+PREFERENCIAS:
+    <jogo>/launcher.cfg (chave = valor), gerado comentado na primeira execucao e editado pela
+    janela (ps2launch-gui). Flags desta linha de comando vencem o arquivo.
 ";
 
 struct Cli {
@@ -69,6 +76,12 @@ fn parse(argv: Vec<String>) -> Result<Option<Cli>> {
             "--shot-dir" => cli.run.shot_dir = Some(next_value(&mut it, &a)?),
             "--missing-log" => cli.run.missing_log = Some(next_value(&mut it, &a)?),
             "--heartbeat" => cli.run.heartbeat = true,
+            "--renderer" => {
+                let v = next_value(&mut it, &a)?.to_ascii_lowercase();
+                settings::Renderer::parse(&v).ok_or_else(|| err!("--renderer espera cpu ou d3d11"))?;
+                cli.run.renderer = Some(v);
+            }
+            "--vsync" => cli.run.vsync = Some(true),
             "--peek" => cli.run.peek = Some(next_value(&mut it, &a)?),
             "--timeout" => cli.run.timeout_secs = Some(next_value(&mut it, &a)?.parse().map_err(|_| err!("--timeout espera um numero"))?),
             "--" => {
@@ -101,7 +114,15 @@ fn execute(cli: Cli) -> Result<i32> {
     if !matches!(cli.command.as_str(), "verify" | "extract" | "run") {
         return Err(err!("comando desconhecido: {} (veja --help)", cli.command));
     }
-    let iso = dump::find_iso(&cfg, cli.iso.as_deref())?;
+    // launcher.cfg (gerado na primeira vez): flags vencem o cfg, que vence o padrao.
+    let (settings, warnings) = Settings::load_or_create(&game)?;
+    for w in warnings {
+        warn!("{}: {w}", settings::FILE_NAME);
+    }
+    let mut cli = cli;
+    settings.apply(&mut cli.run);
+    let iso_choice = cli.iso.clone().or_else(|| settings.iso.clone());
+    let iso = dump::find_iso(&cfg, iso_choice.as_deref())?;
     dump::verify(&cfg, &iso)?;
     dump::verify_sizes(&cfg, &iso)?;
     match cli.command.as_str() {

@@ -5,11 +5,36 @@ edition = "2021"
 description = "Launcher leve e generico para ports PS2 (valida o dump do usuario, extrai dados e inicia o port)"
 license = "GPL-3.0-or-later"
 publish = false
+autobins = false
+
+[[bin]]
+name = "ps2launch"
+path = "src/main.rs"
+
+# Janela do launcher. Atras da feature `gui` para o CLI continuar leve (so serde, toml, sha2):
+#   cargo build --release --features gui --bin ps2launch-gui
+[[bin]]
+name = "ps2launch-gui"
+path = "src/bin/gui.rs"
+required-features = ["gui"]
+
+[features]
+gui = ["dep:eframe", "dep:image", "dep:gilrs", "dep:rfd"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 sha2 = "0.10"
+# --- so com a feature `gui` ---
+# egui/eframe com OpenGL (glow): sem wgpu, sem fontes do sistema via provider; as fontes do
+# Windows sao lidas de C:\Windows\Fonts em tempo de execucao (nada embutido alem das padrao do egui).
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "clipboard"], optional = true }
+# Arte do jogo (<jogo>/artwork/*.png), so PNG.
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+# Navegacao por controle (D-pad, A/B, LB/RB, Start).
+gilrs = { version = "0.11", optional = true }
+# Dialogo nativo de arquivo/pasta (Procurar, Exportar logs).
+rfd = { version = "0.17", default-features = false, optional = true }
 
 [profile.release]
 opt-level = "s"
