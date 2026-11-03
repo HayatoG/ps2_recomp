@@ -292,3 +292,14 @@ Medir só o primeiro engana: você pode apresentar 200 imagens por segundo e o j
 - ❌ Confiar na barra "1330/1332" → ✅ o último passo (link com LTCG) era 99% do trabalho e falhou com `Stack overflow`.
 - ❌ Medir com os logs padrão do runtime ligados → ✅ perfil de medição separado (logs e LTCG desligados).
 - ❌ Esperar o build "acabar" parado → ✅ escrever pad virtual, medidor de FPS, patches, launcher e roteiro enquanto compila (regra 9).
+
+## Rodada 7: licença, arquitetura e o plano para GPU, launcher e lojas
+
+**Por que falar de GPL agora.** Nosso runtime é derivado do PS2Recomp (GPL-3.0). A licença só pesa quando distribuímos, mas decidir cedo evita surpresa: `LICENSE` nos dois repos e um `LEGAL.md` com checklist de publicação (varrer *todo* o histórico, não só o último commit). [TELA: o checklist] Honestidade: não sou advogado; o status jurídico do C++ gerado a partir do ELF fica como pergunta aberta.
+
+**Por que GPU, e por que D3D11 primeiro.** O perfil mostrou 98,7% do tempo no rasterizador por software; otimizar a CPU rende poucos por cento por passo. Li o renderer por hardware do PCSX2 só como referência de comportamento (GPL: não copio código). Lições: a VRAM de 4 MB e o swizzle ficam na CPU, a GPU tem alvos lineares com cache, o blend do PS2 muitas vezes precisa de shader, e quando a GPU não dá conta cai-se para software. Nosso encaixe é a interface `GSRasterBackend`. Ordem escolhida: D3D11 (menos código, Windows), depois Vulkan (Linux/Deck) e D3D12. [PREENCHER] resultados quando o backend existir.
+
+**Launcher e assets, o que aprendi com os launchers do AkitaOnRails.** Identificar a edição por hash e *recusar* em vez de adivinhar; nunca mexer no jogo original; extrair com manifesto, escrita atômica e retomada; rede só se o jogador pedir. O que *não* copio: o pacote HD derivado de arte do jogo (fere a minha regra de não distribuir assets). Nosso launcher hoje só valida o ELF e copia 2,9 GB crus; o plano lista as lacunas e as opções (extrair com manifesto agora, ler direto do ISO depois).
+
+**Steam, GOG e Deck.** Confirmado: o launcher precisa ser navegável por controle, texto >= 12 px a 1280x800, 30 fps a 800p, sem DRM na GOG, e o Smart App Control exige assinar o executável (já nos mordeu). Não confirmado: a política das lojas para ports que exigem os arquivos do usuário; isso fica registrado como pesquisa pendente.
+

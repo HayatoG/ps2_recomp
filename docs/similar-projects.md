@@ -70,3 +70,10 @@ Observação: o recurso comum é **splat + ee-gcc 2.9x + objdiff + decomp.me**. 
 6. **Formatos de arquivo**: sem trabalho prévio; engenharia reversa própria. Começar pelo código (xrefs de leitura de arquivo no ELF via ReVa, estrutura da tabela de `IMAGE.BIN`), depois ferramentas em `tools/` com logs. Vídeos `MOV*.BIN` provavelmente PSS/MPEG-2 (verificar magic `00 00 01 BA`); áudio em VAG/ADPCM ou similar (hipóteses, sem verificação).
 7. **Documentação e processo**: adotar o modelo de ico-pc (`docs/LEGAL.md`, `ARCHITECTURE.md`, extração de assets do disco do usuário na primeira execução) para atender às regras 2, 4 e 5. Se decidirmos fazer matching em alguns módulos, usar a pilha splat + objdiff + decomp.me, tomando o setup do God Hand como referência.
 8. **Riscos gerais**: licenças GPL (PS2Recomp, PCSX2, m2c); material derivado do SDK Sony (assinaturas, tipos) é zona cinzenta; vários repositórios sem licença declarada, usar só como leitura/estudo; projetos muito novos e com código gerado por IA exigem auditoria.
+
+## Launchers de referência (adicionado)
+
+| Projeto | URL | Licença | O que reaproveitar |
+|---|---|---|---|
+| rea-launcher-sdk (AkitaOnRails) | https://github.com/akitaonrails/rea-launcher-sdk | MIT OR Apache-2.0 | Identificação por hash com recusa amigável, runtime privado com manifesto, ledger, download retomável verificado, `launcher.cfg`, `--check`, logs com limite; ver `launcher-plan.md` |
+| rea-colin-mcrae, rea-screamer-trilogy | https://github.com/akitaonrails/rea-colin-mcrae | ver repo | Exemplos de launcher por jogo; **não** copiar o pacote HD derivado de arte (regra 2) |

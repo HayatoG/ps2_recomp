@@ -48,9 +48,9 @@ completo, `LoadClut`, `BeginTransfer/UploadImage`, `Flush/TextureFlush/Sync`, `P
    `GSCpuBackend` continua como **referência** e fallback.
 2. **RHI fina** (camada de dispositivo): textura, buffer, pipeline, draw, cópia, readback,
    apresentar. Shaders em **HLSL** uma vez só; D3D usa direto, Vulkan recebe SPIR-V (DXC).
-3. Ordem das APIs: **Vulkan** primeiro (também roda em Linux/Steam Deck) ou **D3D11** se o foco for
-   só Windows e quisermos menos código; **D3D12** depois que a RHI estiver estável.
-   ("D3D13" não existe; a versão atual é D3D12.)
+3. Ordem das APIs (decidida pelo usuário): **D3D11 no Windows primeiro**, depois **Vulkan** e **D3D12**.
+   D3D11 dá menos código e basta para este GS; Vulkan traz Linux/Steam Deck; D3D12 entra quando a RHI
+   estiver estável. ("D3D13" não existe; a versão atual é D3D12.)
 
 ## Roteiro por etapas (baixo risco)
 Cada etapa fecha com a comparação de imagem contra o `GSCpuBackend` (mesmo script de pad).
@@ -78,7 +78,7 @@ Cada etapa fecha com a comparação de imagem contra o `GSCpuBackend` (mesmo scr
   o MD5 só para o backend de CPU.
 
 ## Perguntas em aberto
-- Vulkan ou D3D11 primeiro? (depende de querer Linux/Steam Deck)
+- ~~Vulkan ou D3D11 primeiro?~~ **Decidido pelo usuário:** D3D11 no Windows primeiro; depois Vulkan e D3D12 (os três são objetivo). No Deck, D3D11 via Proton/DXVK serve de caminho curto (ver `distribution.md`).
 - Qual biblioteca de janela/entrada o runtime já usa para apresentar? `[PREENCHER]` (verificar
   antes da etapa 1).
 - Quanto do que o jogo usa cai nos "casos difíceis"? medir com um contador de features por draw
