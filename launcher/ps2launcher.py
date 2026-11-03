@@ -146,6 +146,8 @@ def build_run_env(cfg: GameConfig, opts: argparse.Namespace) -> dict[str, str]:
         env["PS2X_SHOT_DIR"] = str(opts.shot_dir.resolve())
     if opts.missing_log is not None:
         env["PS2X_MISSING_LOG"] = str(opts.missing_log.resolve())
+    if opts.heartbeat:
+        env["PS2X_HEARTBEAT"] = "1"
     return env
 
 
@@ -184,6 +186,8 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     run_opts.add_argument("--shot-dir", type=Path, metavar="DIR", help="onde salvar os PNG do comando 'shot' do pad virtual")
     run_opts.add_argument("--missing-log", type=Path, metavar="ARQ",
                           help="acrescenta aqui cada alvo de desvio sem função gerada (para CreateFunctionsAt)")
+    run_opts.add_argument("--heartbeat", action="store_true",
+                          help="imprime uma linha por segundo com PC/DMA/GS/threads do jogo (diagnóstico)")
     run_opts.add_argument("--timeout", type=float, metavar="S", help="encerra o jogo após S segundos (testes automatizados)")
     return parser.parse_known_args(argv)
 
