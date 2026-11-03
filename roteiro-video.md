@@ -224,6 +224,11 @@ Medir só o primeiro engana: você pode apresentar 200 imagens por segundo e o j
 3. **O que ele NÃO fez, e por quê:** dividir o desenho entre várias threads. O cache de textura é sequencial e algumas figuras leem o próprio framebuffer enquanto escrevem; paralelizar sem provar que o resultado é idêntico trocaria correção por velocidade. **Regra do projeto: nunca trocar fidelidade por FPS sem prova.**
 4. **O medidor mostrou o outro lado da moeda:** na cena seguinte (mais leve) o jogo chega a **50,00 Hz (99,99% do tempo real) e 52 FPS no host**. Ou seja: o desempenho depende da cena — o menu é pesado porque desenha várias imagens grandes com mistura; as cenas simples já estão no alvo.
 
+**Sexta rodada: antecipar uma classe inteira de erros.**
+1. *O mesmo erro, pela terceira vez:* o jogo parou de novo por um "alvo ausente" (uma função que ninguém chama diretamente, só por ponteiro). Cada correção individual exigia um rebuild de ~14 minutos. **Em vez de consertar o 3º caso, escrevemos um varredor para a classe inteira:** ele lê todas as palavras de 32 bits das áreas de dados e todas as constantes de endereço do código e acha tudo que aponta para o meio do código fora de qualquer função. Resultado: **349 funções novas de uma vez**, incluindo a que travou. *Lição: depois de ver o mesmo padrão três vezes, pare de remendar e resolva o padrão.*
+2. *O jogo passou do ponto e mostrou a abertura* — um fundo hexagonal animado, com ruído ciano e laranja. `[TELA]` captura da cena.
+3. **Desempenho medido cena por cena (e por que é importante):** boot e menu ~53% do tempo real; telas intermediárias 61–68%; **a cena hexagonal, 46%** (22,9 Hz de 50). Mesmo o jogo "rodando", a velocidade depende do que está na tela — preencher a tela inteira com uma textura misturada em software é a operação mais cara do rasterizador. *Lição: um benchmark só no menu esconderia o pior caso.*
+
 **Metas:** 30 FPS (o mínimo jogável), 60 FPS (o ideal) e "ilimitado" (para medir o custo bruto). O limite virou configurável (`--fps 30|60|0`).
 **Como vamos otimizar (ordem):** 1) medir (baseline); 2) achar o gargalo com perfilador; 3) corrigir o maior; 4) medir de novo. *Nunca otimizar o que não foi medido.*
 **Resultado:** `[PREENCHER — FPS medido, gargalos, o que ajudou]`.
