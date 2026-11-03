@@ -10,8 +10,9 @@ diferente: o ico-pc compila C decompilado à mão; aqui o código do jogo é **r
 estaticamente** do ELF. Detalhes de um jogo específico ficam em `<jogo>/docs/ARCHITECTURE.md`
 (ex.: `ghost_pc/docs/ARCHITECTURE.md`).
 
-> Estado: a camada de GS roda **só por software**. O backend de GPU está em planejamento
-> ([GS: hoje e plano](#gs-hoje-e-plano)). Áudio, vídeo (FMV) e memory card ainda não foram
+> Estado: a camada de GS roda **só por software**. O backend de GPU tem a etapa 1 escrita
+> (RHI D3D11 que apresenta o frame da CPU; testada fora do runtime, ainda não integrada) —
+> [GS: hoje e plano](#gs-hoje-e-plano). Áudio, vídeo (FMV) e memory card ainda não foram
 > tratados neste projeto.
 
 ## Arquivos
@@ -112,7 +113,9 @@ permite navegar e medir sem ninguém apertar nada:
 
 Fluxo atual: o jogo escreve pacotes GIF (por DMA) → `gs_frontend.cpp` decodifica registradores e
 monta primitivas → `GSRasterBackend::Submit(GSPrimitiveBatch)` → `GSCpuBackend` rasteriza na VRAM
-de 4 MB emulada → `Present` entrega os pixels ao host.
+de 4 MB emulada → `Present` entrega os pixels ao host. A janela, a textura de apresentação e a
+entrada do host são da **raylib** (GLFW + OpenGL no Windows); `Present` roda na thread da janela,
+o desenho na `GameThread`.
 
 `GSRasterBackend` (`include/runtime/gs/gs_backend.h`) é a fronteira para trocar o renderer:
 recebe primitivas já montadas com o estado completo (`GSDrawState`: TEX0, ALPHA, TEST, ZBUF,
