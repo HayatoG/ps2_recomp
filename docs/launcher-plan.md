@@ -128,3 +128,14 @@ são o grosso; como o FMV nem foi tratado ainda, decidir C junto com o trabalho 
 5. Decidir a linguagem final e portar o núcleo; GUI com gamepad. **Rust decidido; janela `ps2launch-gui` feita** (egui/glow, feature `gui`, abas Jogar/Imagem/Controles, gilrs, `--check`/`--no-window`/`--settings`). Falta testar com controle real e no Deck.
 6. Integração com a Steam local (`steam-add`, arte, perfil Deck; ver `steam-library.md`), empacotamento e assinatura (`distribution.md`).
 7. Avaliar VFS direto do ISO/CHD no runtime.
+
+## 5. Discord Rich Presence (pedido do usuário, 03/11/2026)
+
+Mostrar no Discord "Jogando <jogo>" com tempo de partida, e opcionalmente renderer e FPS.
+
+- **Como funciona:** o cliente do Discord abre um canal local (pipe nomeado no Windows, socket no Linux). O app manda uma atividade (texto, tempo, imagens). Não há servidor nosso nem rede própria: quem fala com a internet é o próprio Discord. Crate candidata: `discord-rich-presence` (MIT; não verificado nesta máquina).
+- **O que o usuário precisa criar:** um *Application* no Discord Developer Portal (grátis) e passar o **Application ID** (não é segredo). As imagens de capa/ícone do Rich Presence são enviadas por ele ao portal (artes dele, de uso pessoal).
+- **Onde roda:** o launcher gráfico FECHA quando o jogo abre; a presença precisa de um processo vivo. Opções: (a) `ps2launch presence --pid N` em segundo plano, lançado pelo launcher e encerrado quando o runtime sai (recomendado: sem tocar no runtime, sem janela); (b) mandar o runtime escrever um arquivo de estado (`PS2X_STATUS_FILE`: fps, tela atual) que o helper lê para atualizar a atividade. No começo só (a): "Jogando", tempo desde o início, renderer. Cena/menu só quando o runtime souber informar (não inventar).
+- **Privacidade e regras:** desligado por padrão (opt-in no `launcher.cfg`: `discord = 0|1`, `discord_app_id = ...`); nunca enviar caminhos, nome de usuário, hashes nem nome de arquivos; só texto fixo do jogo, tempo e renderer. Se o Discord não estiver aberto, falhar em silêncio (log em `launcher_*.log`). Sem rede por padrão (regra do plano) continua valendo: a ativação é ação explícita do usuário.
+- **Etapas:** (1) chaves `discord`/`discord_app_id` em `settings.rs` e na aba Jogar; (2) helper `presence` com reconexão e encerramento junto do processo do jogo; (3) opcional: status do runtime por arquivo; (4) teste manual com o Discord aberto.
+
