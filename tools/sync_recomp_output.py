@@ -1,8 +1,9 @@
 """Sincroniza o C++ gerado pelo ps2_recomp com uma arvore de build do PS2Recomp.
 
 Uso: python -I tools/sync_recomp_output.py <output_do_recompilador> <ps2xRuntime>
-- Remove os .cpp antigos de <ps2xRuntime>/src/runner (funcoes renomeadas deixam arquivos orfaos que
-  geram definicoes duplicadas) e copia os novos .cpp para la.
+- Copia SO os .cpp que mudaram para <ps2xRuntime>/src/runner (arquivos identicos mantem o timestamp, entao o
+  ninja faz build incremental de verdade) e remove os orfaos (funcoes renomeadas deixam arquivos antigos que
+  geram definicoes duplicadas).
 - Copia os .h gerados (ps2_recompiled_*.h) para <ps2xRuntime>/include.
 - So toca arquivos gerados; nao mexe em main.cpp (que fica em src/) nem em outros fontes.
 Logs em ./logs (execute a partir do diretorio do jogo).
@@ -20,11 +21,32 @@ log = logging.getLogger("sync_recomp_output")
 HEADER_PREFIX = "ps2_recompiled_"
 
 
-def copy_files(sources: list[Path], dest_dir: Path, workers: int) -> int:
+def same_content(src: Path, dst: Path) -> bool:
+    """Mesmo conteudo? (tamanho primeiro; so entao compara os bytes)"""
+    try:
+        if src.stat().st_size != dst.stat().st_size:
+            return False
+        return src.read_bytes() == dst.read_bytes()
+    except OSError:
+        return False
+
+
+def sync_files(sources: list[Path], dest_dir: Path, workers: int) -> tuple[int, int]:
+    """Copia so o que mudou: arquivos identicos mantem o timestamp, e o ninja nao recompila o que nao mudou.
+
+    Retorna (copiados, inalterados)."""
     dest_dir.mkdir(parents=True, exist_ok=True)
+
+    def one(src: Path) -> bool:
+        dst = dest_dir / src.name
+        if same_content(src, dst):
+            return False
+        shutil.copyfile(src, dst)
+        return True
+
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        list(pool.map(lambda src: shutil.copyfile(src, dest_dir / src.name), sources))
-    return len(sources)
+        changed = sum(pool.map(one, sources))
+    return changed, len(sources) - changed
 
 
 def main(argv: list[str]) -> int:
@@ -51,13 +73,17 @@ def main(argv: list[str]) -> int:
         log.error("saida do recompilador sem .cpp ou sem %s*.h; abortando sem alterar nada", HEADER_PREFIX)
         return 2
 
+    # Orfaos: funcoes renomeadas deixam arquivos antigos que gerariam definicoes duplicadas.
+    keep = {p.name for p in new_cpp}
     removed = 0
     for old in runner_dir.glob("*.cpp"):
-        old.unlink()
-        removed += 1
-    copied_cpp = copy_files(new_cpp, runner_dir, args.workers)
-    copied_h = copy_files(new_headers, include_dir, args.workers)
-    log.info("runner: removidos %d, copiados %d .cpp; include: %d cabecalhos", removed, copied_cpp, copied_h)
+        if old.name not in keep:
+            old.unlink()
+            removed += 1
+    copied_cpp, same_cpp = sync_files(new_cpp, runner_dir, args.workers)
+    copied_h, same_h = sync_files(new_headers, include_dir, args.workers)
+    log.info("runner: %d .cpp copiados, %d inalterados, %d orfaos removidos; include: %d cabecalhos copiados, %d inalterados",
+             copied_cpp, same_cpp, removed, copied_h, same_h)
     return 0
 
 

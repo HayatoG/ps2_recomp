@@ -36,24 +36,25 @@ $scriptPath = @(
     (& $fwd (Join-Path $root 'third_party\PS2Recomp\ps2xRecomp\tools\ghidra'))
 ) -join ';'
 
-$args = @("`"$(& $fwd (Join-Path $game $Project))`"", $ProjectName, '-process', $Program, '-noanalysis')
-if ($ReadOnly) { $args += '-readOnly' }
-$args += @('-scriptPath', "`"$scriptPath`"")
+$argList = @("`"$(& $fwd (Join-Path $game $Project))`"", $ProjectName, '-process', $Program, '-noanalysis')
+if ($ReadOnly) { $argList += '-readOnly' }
+$argList += @('-scriptPath', "`"$scriptPath`"")
 foreach ($entry in $Script) {
     $parts = @($entry)
-    $args += @('-postScript', $parts[0])
-    foreach ($a in $parts[1..($parts.Count - 1)]) {
+    $argList += @('-postScript', $parts[0])
+    $scriptArgs = if ($parts.Count -gt 1) { $parts[1..($parts.Count - 1)] } else { @() }
+    foreach ($a in $scriptArgs) {
         # caminhos relativos a raiz do repo viram absolutos; outros valores passam como estao
         $candidate = Join-Path $root $a
         $value = if ($a -match '[\\/]' -and -not [IO.Path]::IsPathRooted($a)) { & $fwd $candidate } else { $a }
-        $args += "`"$value`""
+        $argList += "`"$value`""
     }
 }
 
 $logDir = Join-Path $game 'logs'
 New-Item -ItemType Directory -Force $logDir | Out-Null
 $env:JAVA_HOME = $JavaHome
-$proc = Start-Process -FilePath (Join-Path $GhidraDir 'support\analyzeHeadless.bat') -ArgumentList $args `
+$proc = Start-Process -FilePath (Join-Path $GhidraDir 'support\analyzeHeadless.bat') -ArgumentList $argList `
     -Wait -PassThru -NoNewWindow `
     -RedirectStandardOutput (Join-Path $logDir "$LogName.log") `
     -RedirectStandardError (Join-Path $logDir "$LogName.err")

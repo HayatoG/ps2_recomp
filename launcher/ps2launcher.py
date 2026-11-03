@@ -146,8 +146,10 @@ def build_run_env(cfg: GameConfig, opts: argparse.Namespace) -> dict[str, str]:
         env["PS2X_SHOT_DIR"] = str(opts.shot_dir.resolve())
     if opts.missing_log is not None:
         env["PS2X_MISSING_LOG"] = str(opts.missing_log.resolve())
-    if opts.heartbeat:
+    if opts.heartbeat or opts.peek:
         env["PS2X_HEARTBEAT"] = "1"
+    if opts.peek:
+        env["PS2X_PEEK"] = opts.peek
     return env
 
 
@@ -188,6 +190,7 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
                           help="acrescenta aqui cada alvo de desvio sem função gerada (para CreateFunctionsAt)")
     run_opts.add_argument("--heartbeat", action="store_true",
                           help="imprime uma linha por segundo com PC/DMA/GS/threads do jogo (diagnóstico)")
+    run_opts.add_argument("--peek", metavar="0xA,0xB", help="endereços da RAM do jogo a imprimir no heartbeat (diagnóstico)")
     run_opts.add_argument("--timeout", type=float, metavar="S", help="encerra o jogo após S segundos (testes automatizados)")
     return parser.parse_known_args(argv)
 
