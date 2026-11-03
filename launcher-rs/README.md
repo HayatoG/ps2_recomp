@@ -17,5 +17,7 @@ target\release\ps2launch.exe extract --game ..\ghost_pc [--force]
 target\release\ps2launch.exe run     --game ..\ghost_pc --fps 60
 ```
 
-Proximo: tabela de edicoes, `launcher.cfg`, GUI minima com gamepad, `artwork` e `steam-add`
+Tabela de edicao: `[[dump.file]]` no `game.toml` (nome, tamanho, sha256). `verify` confere os tamanhos pelo diretorio da imagem (rapido); `verify --deep` confere os hashes; `hashes` imprime o bloco a partir do manifesto (para uma edicao nova). Edicao desconhecida ou imagem truncada e RECUSADA.
+
+Proximo: `launcher.cfg`, GUI minima com gamepad, `artwork` e `steam-add`
 (ver `docs/steam-library.md`). Nada do jogo e embutido nem baixado.

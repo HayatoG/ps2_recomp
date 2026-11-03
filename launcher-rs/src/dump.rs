@@ -1,6 +1,6 @@
 //! Localiza e valida o dump original do usuario (regra 4): serial (BOOT2) + sha256 do ELF de boot.
 //! Edicao desconhecida e RECUSADA, mostrando o hash para o usuario reportar; nunca se adivinha.
-use crate::{config::GameConfig, err, error::Result, info, iso::Iso};
+use crate::{assets, config::GameConfig, err, error::Result, info, iso::Iso};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -58,5 +58,31 @@ pub fn verify(cfg: &GameConfig, iso_path: &Path) -> Result<()> {
         ));
     }
     info!("dump verificado: {} serial={} sha256={digest}", iso_path.display(), cfg.serial);
+    Ok(())
+}
+
+/// Confere, pelo diretorio da imagem (sem ler os dados), o tamanho de cada arquivo conhecido do
+/// `[[dump.file]]`. Pega imagens truncadas/de outra edicao rapido; o hash fica para `verify --deep`.
+pub fn verify_sizes(cfg: &GameConfig, iso_path: &Path) -> Result<()> {
+    if cfg.dump_files.is_empty() {
+        return Ok(());
+    }
+    let mut iso = Iso::open(iso_path)?;
+    let items = assets::plan(&mut iso, &cfg.extract_files)?;
+    let mut bad = Vec::new();
+    for known in &cfg.dump_files {
+        match items.iter().find(|(rel, _)| *rel == known.name) {
+            Some((_, e)) if e.size as u64 == known.size => {}
+            Some((_, e)) => bad.push(format!("{}: tamanho {} (esperado {})", known.name, e.size, known.size)),
+            None => bad.push(format!("{}: ausente na imagem", known.name)),
+        }
+    }
+    if !bad.is_empty() {
+        return Err(err!("a imagem difere da edicao conhecida:
+  {}
+Dump de outra edicao ou truncado. Nada sera executado.", bad.join("
+  ")));
+    }
+    info!("tamanhos conferidos: {} arquivos conhecidos", cfg.dump_files.len());
     Ok(())
 }

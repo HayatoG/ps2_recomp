@@ -48,3 +48,6 @@ Thumbs.db
 
 # --- Codigo de terceiros clonado para estudo/spike (GPL etc.; nunca commitar) ---
 /third_party/
+
+# Cargo.lock do launcher e versionado (binario, builds reprodutiveis)
+!/launcher-rs/Cargo.lock

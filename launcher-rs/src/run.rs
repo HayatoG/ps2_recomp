@@ -108,6 +108,7 @@ mod tests {
             region: "PAL".into(),
             iso_glob: "*.iso".into(),
             boot_elf_sha256: String::new(),
+            dump_files: vec![],
             work_dir: "w".into(),
             extract_files: vec![],
             run_executable: None,

@@ -60,7 +60,7 @@ impl Manifest {
 }
 
 /// Expande os nomes pedidos em (caminho_relativo, entrada); diretorio vira seus arquivos.
-fn plan(iso: &mut Iso, wanted: &[String]) -> Result<Vec<(String, Entry)>> {
+pub fn plan(iso: &mut Iso, wanted: &[String]) -> Result<Vec<(String, Entry)>> {
     let mut out = Vec::new();
     for name in wanted {
         let e = iso.find(name)?.clone();
@@ -189,6 +189,46 @@ pub fn verify_deep(cfg: &GameConfig) -> Result<()> {
     manifest.save(&cfg.work_dir)?;
     if bad > 0 {
         return Err(err!("{bad} arquivo(s) com problema; rode 'extract --force'"));
+    }
+    Ok(())
+}
+
+/// `deep` compara tambem o sha256 dos arquivos extraidos com `[[dump.file]]` do game.toml.
+pub fn check_known_hashes(cfg: &GameConfig) -> Result<()> {
+    let manifest = Manifest::load(&cfg.work_dir);
+    let mut bad = 0;
+    for known in cfg.dump_files.iter().filter(|k| !k.sha256.is_empty()) {
+        match manifest.get(&known.name) {
+            Some(rec) if rec.sha256.is_empty() => warn!("{}: sem hash no manifesto (rode verify --deep)", known.name),
+            Some(rec) if rec.sha256 == known.sha256 => {}
+            Some(_) => {
+                warn!("{}: sha256 diferente da edicao conhecida", known.name);
+                bad += 1;
+            }
+            None => {
+                warn!("{}: nao extraido", known.name);
+                bad += 1;
+            }
+        }
+    }
+    if bad > 0 {
+        return Err(err!("{bad} arquivo(s) nao batem com a edicao conhecida"));
+    }
+    Ok(())
+}
+
+/// Imprime o bloco `[[dump.file]]` a partir do manifesto (para colar no game.toml de uma edicao nova).
+pub fn print_known_table(cfg: &GameConfig) -> Result<()> {
+    let manifest = Manifest::load(&cfg.work_dir);
+    if manifest.files.iter().any(|f| f.sha256.is_empty()) {
+        return Err(err!("ha arquivos sem hash no manifesto; rode 'verify --deep' antes"));
+    }
+    for f in &manifest.files {
+        println!("[[dump.file]]
+name = \"{}\"
+size = {}
+sha256 = \"{}\"
+", f.path, f.size, f.sha256);
     }
     Ok(())
 }

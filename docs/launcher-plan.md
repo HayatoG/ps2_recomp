@@ -121,8 +121,8 @@ são o grosso; como o FMV nem foi tratado ainda, decidir C junto com o trabalho 
   (regra 6). Também recolher o log do runtime.
 
 ## 4. Etapas
-1. Tabela de edições + `verify` rápido/profundo + recusa amigável (Python, no launcher atual).
-2. Extração atômica com manifesto, espaço livre e retomada.
+1. ~~Tabela de edições + `verify` rápido/profundo + recusa amigável~~ **feito em `launcher-rs/`** (`[[dump.file]]`, `verify`, `verify --deep`, `hashes`).
+2. ~~Extração atômica com manifesto, espaço livre e retomada~~ **feito** (`.part`, manifesto, checagem de espaço; retomada por arquivo).
 3. Camada de caminhos por SO e `launcher.cfg` (gerado e comentado).
 4. Entradas BIN/CUE e CHD.
 5. Decidir a linguagem final e portar o núcleo; GUI com gamepad.

@@ -12,6 +12,7 @@ USO:
 COMANDOS:
     info      mostra a configuracao lida do game.toml
     verify    valida o dump (serial + sha256 do ELF); com --deep, rehash dos arquivos extraidos
+    hashes    imprime o bloco [[dump.file]] (tamanho + sha256) do manifesto, para o game.toml
     extract   extrai os dados do disco para <jogo>/work (atomico, com manifesto)
     run       valida, extrai o que falta e inicia o port
 
@@ -93,15 +94,21 @@ fn execute(cli: Cli) -> Result<i32> {
         info!("work={} extrair={:?} executavel={:?}", cfg.work_dir.display(), cfg.extract_files, cfg.run_executable);
         return Ok(0);
     }
+    if cli.command == "hashes" {
+        assets::print_known_table(&cfg)?;
+        return Ok(0);
+    }
     if !matches!(cli.command.as_str(), "verify" | "extract" | "run") {
         return Err(err!("comando desconhecido: {} (veja --help)", cli.command));
     }
     let iso = dump::find_iso(&cfg, cli.iso.as_deref())?;
     dump::verify(&cfg, &iso)?;
+    dump::verify_sizes(&cfg, &iso)?;
     match cli.command.as_str() {
         "verify" => {
             if cli.deep {
                 assets::verify_deep(&cfg)?;
+                assets::check_known_hashes(&cfg)?;
             }
             Ok(0)
         }

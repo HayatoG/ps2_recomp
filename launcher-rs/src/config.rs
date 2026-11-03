@@ -28,6 +28,18 @@ struct RawDump {
     #[serde(default = "default_glob")]
     iso_glob: String,
     boot_elf_sha256: String,
+    /// Tabela de arquivos conhecidos da edicao (`[[dump.file]]`): nome, tamanho e sha256 opcional.
+    #[serde(default)]
+    file: Vec<DumpFile>,
+}
+
+/// Arquivo conhecido do disco (conhecimento nosso: so nome, tamanho e hash; nunca bytes do jogo).
+#[derive(Deserialize, Debug, Clone)]
+pub struct DumpFile {
+    pub name: String,
+    pub size: u64,
+    #[serde(default)]
+    pub sha256: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -57,6 +69,7 @@ pub struct GameConfig {
     pub region: String,
     pub iso_glob: String,
     pub boot_elf_sha256: String,
+    pub dump_files: Vec<DumpFile>,
     pub work_dir: PathBuf,
     pub extract_files: Vec<String>,
     pub run_executable: Option<PathBuf>,
@@ -79,6 +92,7 @@ impl GameConfig {
             region: raw.game.region,
             iso_glob: raw.dump.iso_glob,
             boot_elf_sha256: raw.dump.boot_elf_sha256.to_lowercase(),
+            dump_files: raw.dump.file,
             work_dir: game_dir.join(raw.extract.work_dir.unwrap_or_else(|| "work".into())),
             extract_files: raw
                 .extract
