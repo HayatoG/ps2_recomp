@@ -112,7 +112,8 @@ são o grosso; como o FMV nem foi tratado ainda, decidir C junto com o trabalho 
     Smart App Control complica exe gerado por PyInstaller.
   - *C++ com SDL3 + Dear ImGui no mesmo toolchain do runtime*: uma só linguagem, entrada por SDL3
     igual ao jogo. Contra: reimplementar as utilidades.
-  - **Recomendação provisória:** manter o Python como protótipo/ferramenta de desenvolvedor e
+  - **Decisão do usuário (2026-11-03): launcher em Rust, leve.** Implementação inicial em `launcher-rs/`.
+  - ~~Recomendação provisória:~~ manter o Python como protótipo/ferramenta de desenvolvedor e
     escrever o launcher de distribuição em Rust (egui), reaproveitando ideias do SDK. Confirmar
     com o usuário antes de começar.
 - **Config e dados** por SO (ver `distribution.md`): portátil (pasta ao lado) ou perfil do usuário.
