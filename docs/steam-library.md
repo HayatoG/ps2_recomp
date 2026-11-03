@@ -35,14 +35,27 @@ O atalho deve apontar para o **launcher** (não direto para o runtime), assim a 
 a escolha de renderer/perfil rodam sempre; o launcher precisa funcionar sem janela (`--no-window`)
 e com gamepad, por causa do Deck.
 
-## Arte: o ponto legal
-- **Não commitar nem distribuir a capa oficial do jogo, logos, screenshots do jogo** (regra 2; são
-  direitos autorais).
-- Opções: (a) o usuário coloca a própria imagem numa pasta local ignorada pelo git
-  (`<dados>/artwork/`) e o launcher a instala no `grid/`; (b) um conjunto **neutro nosso** (nome do
-  port, sem marca do jogo); (c) buscar no SteamGridDB por ação explícita do usuário (rede só sob
-  pedido; **não confirmado** termos de uso para automação).
-- Nome exibido no atalho: o usuário escolhe; padrão neutro (nome do port).
+## Arte: sai do dump do próprio usuário
+Decisão do usuário: a arte do atalho pode vir **das artes disponíveis no próprio dump**, e o port é
+de uso pessoal (só ele usa). Isto casa com as regras 2, 4 e 5: o launcher gera a arte **a partir do
+dump que o usuário fornece**, grava só em pasta local ignorada pelo git (`<dados>/artwork/`) e
+instala no `grid/` da Steam. Continua valendo: **nunca commitar** capas, logos, texturas ou
+screenshots do jogo, e não distribuir o resultado a terceiros (se um dia o port for compartilhado,
+cada pessoa gera a arte do seu próprio dump).
+
+Fontes possíveis, em ordem de preferência (**a verificar o que o disco realmente tem**; um disco de
+PS2 normalmente não traz "box art", e nem o ícone 3D do memory card está no disco):
+1. Texturas do próprio jogo (logo/título/imagens de menu em `IMAGE.BIN`, formato zim, já lido por
+   `tools/zim.py`): extrair e converter para PNG localmente.
+2. Captura do frame da tela de título gerada pelo nosso runtime (`--shot-dir` com o script de pad
+   da tela de título; já temos esse caminho funcionando).
+3. Imagem fornecida pelo usuário em `<dados>/artwork/` (substitui as automáticas).
+
+Composição (landscape de 4:3 ou 16:9 para os formatos da Steam): grade larga e hero cabem direto;
+a capa vertical (600x900, **não confirmado**) precisa de enquadramento (corte central ou fundo
+desfocado); logo e ícone só se houver arte isolada no disco. O comando `artwork` do launcher gera
+os PNGs nos tamanhos da Steam, e o `steam-add` os instala. Nome do atalho: o título do jogo
+(já que é uso pessoal) ou outro à escolha do usuário.
 
 ## Steam Deck
 - Modo Desktop: adicionar o launcher como non-Steam (ou rodar o `steam-add` lá); modo Jogo: abre
@@ -53,5 +66,5 @@ e com gamepad, por causa do Deck.
 ## Etapas
 1. README com o passo manual + perfil de execução do Deck no `game.toml`/`launcher.cfg`.
 2. `launcher.cfg` com `profile = desktop|deck` e flags equivalentes.
-3. `steam-add` (backup, idempotente, log) e instalação da arte local em `grid/`.
+3. `artwork` (extrai/gera PNGs do dump, local) e `steam-add` (backup, idempotente, log; instala a arte em `grid/`). Antes: levantar quais imagens o disco tem.
 4. Testar no PC (Windows) e depois num Deck real (nunca testado até aqui).
