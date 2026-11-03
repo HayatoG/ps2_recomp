@@ -152,3 +152,35 @@ vsync ligado; redimensionar/minimizar a janela com o jogo rodando; outros adapta
   o encaixe do D3D11 em [Apresentação hoje](#apresentação-hoje-raylib-e-o-encaixe-do-d3d11).
 - Quanto do que o jogo usa cai nos "casos difíceis"? medir com um contador de features por draw
   no `GSCpuBackend` antes de investir (barato e dá os dados para priorizar).
+
+## Medições do contador de features (03/11, primeiro jogo: `ghost_pc`)
+
+Contador opcional no `GSCpuBackend` (`PS2X_GS_FEATURES=1`; blocos `[gs-feat]` a cada 600 presents). Ligado ou
+desligado, a imagem do menu continua idêntica (3/3 execuções com o MD5 de referência). Rodada de ~120 s com o
+script de exploração (menu de idioma, título, abertura). As janelas abaixo são de 600 presents:
+
+| Medida | Menu/idioma | Título/abertura (2 janelas) |
+|---|---|---|
+| Draws por janela | ~301 mil (~500 por present) | ~268 mil e ~245 mil |
+| Pixels estimados por janela | ~1,24 bilhão (~2 M por present) | ~1,9 bilhão (~3 M por present) |
+| Sprites (draws / pixels) | 52% / 63% | 86–89% / 40% |
+| Triângulos (draws / pixels) | 46% / 37% | 10–13% / 59–60% |
+| Texturizados | 34% (46% dos pixels) | ver log |
+| CLUT recarregada entre draws indexados | 17% / 12% dos pixels | **74–86%** dos draws, só 4–5% dos pixels |
+| Render-to-texture | 5,5% dos draws, **29% dos pixels** | 6,6–7,4% dos draws, **20% dos pixels** |
+| Blend "outro" (não simples nem aditivo) | 38% dos draws, 18% dos pixels | 5–12% dos draws, ~10% dos pixels |
+| Z | **Z16S em 94% dos draws** (zwrite) | 92–93% |
+| Frame | CT32 em 95%; CT24 em 5% | idem |
+| Leitura GPU->CPU (local->host) | **0** | **0** |
+| Upload host->local | ~100 mil transferências | ~214–220 mil |
+
+Leituras:
+- **Não há readback local->host** em nenhuma janela: o maior risco de desempenho de um backend GPU (parar o pipeline para ler a VRAM) não aparece neste jogo, ao menos nestas cenas.
+- **Z16S em ~93% dos draws** é o formato de profundidade do jogo. O contador original contava Z16/24 como "caso difícil" e por isso a linha "hard cases" mostra 100%: **essa linha é inútil como está**; usar as linhas individuais. Um backend GPU precisa de um buffer de profundidade de 16 bits com a mesma regra de comparação/escrita.
+- **Render-to-texture** é pouco frequente (5–7% dos draws) mas custa 20–29% dos pixels: são efeitos de tela cheia (pós-processamento). É o primeiro caso que o backend precisa tratar sem passar pela CPU.
+- **CLUT** muda quase a cada draw nas cenas de sprites (74–86%): um cache de paleta/textura convertida por (TBP0, CBP, formato) é obrigatório, senão o upload domina.
+- **Sobreposição**: ~2–3 M de pixels estimados por present contra ~0,29 M da tela (640x448): ~7–10x (o contador superestima triângulos em até 2x). O rasterizador por software paga isso por pixel; na GPU é barato.
+- Blend "outro" em até 38% dos draws na tela de idioma: precisa de blend em shader nesses casos (verificar quais combinações são).
+
+Limitações: estimativa de pixels por bounding box; heurística de RTT pode ter falso positivo se o scissor for maior que o buffer; só menu/título/abertura (nada de gameplay).
+
