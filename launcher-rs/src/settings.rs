@@ -5,7 +5,7 @@
 //! - Precedencia: linha de comando > ambiente (`PS2X_*`) > `launcher.cfg` > `game.toml`
 //!   ([`Settings::apply`] marca o que veio do cfg; `run::build_env` deixa o ambiente vencer).
 //! - Chave desconhecida ou valor invalido vira aviso (nunca derruba o launcher).
-use crate::options::{self, Bands, Crt};
+use crate::options::{self, Bands, Crt, Threads};
 use crate::{error::Result, run::RunOptions};
 use std::path::{Path, PathBuf};
 
@@ -101,6 +101,9 @@ pub struct Settings {
     pub vfs_cache_mb: Option<u32>,
     pub bands: Option<Bands>,
     pub queue_kb: Option<u32>,
+    pub hw_cpuframe: Option<bool>,
+    pub threads: Option<Threads>,
+    pub hw_workers: Option<u32>,
     pub widescreen: Option<bool>,
     /// `false` faz o launcher sem argumentos jogar direto (como `--no-window`).
     pub show_window: Option<bool>,
@@ -119,6 +122,9 @@ pub struct Resolved {
     pub vfs_cache_mb: Option<u32>,
     pub bands: Option<Bands>,
     pub queue_kb: Option<u32>,
+    pub hw_cpuframe: bool,
+    pub threads: Option<Threads>,
+    pub hw_workers: Option<u32>,
     pub widescreen: bool,
 }
 
@@ -171,6 +177,9 @@ impl Settings {
                 "bands" => options::parse_bands(&lower).ok().map(|b| s.bands = Some(b)).is_some(),
                 "queue_kb" => options::parse_queue_kb(&lower).ok().map(|n| s.queue_kb = Some(n)).is_some(),
                 "vfs_cache_mb" => options::parse_cache_mb(&lower).ok().map(|n| s.vfs_cache_mb = Some(n)).is_some(),
+                "hw_cpuframe" => parse_bool(&lower).map(|b| s.hw_cpuframe = Some(b)).is_some(),
+                "threads" => options::parse_threads(&lower).ok().map(|t| s.threads = Some(t)).is_some(),
+                "hw_workers" => options::parse_hw_workers(&lower).ok().map(|n| s.hw_workers = Some(n)).is_some(),
                 "widescreen" => parse_bool(&lower).map(|b| s.widescreen = Some(b)).is_some(),
                 "show_window" => parse_bool(&lower).map(|b| s.show_window = Some(b)).is_some(),
                 _ => {
@@ -192,6 +201,9 @@ impl Settings {
         let base = Resolved {
             heartbeat: self.heartbeat.unwrap_or(false),
             vfs_cache_mb: self.vfs_cache_mb,
+            hw_cpuframe: self.hw_cpuframe.unwrap_or(false),
+            threads: self.threads,
+            hw_workers: self.hw_workers,
             ..Default::default()
         };
         match self.profile {
@@ -272,6 +284,18 @@ impl Settings {
             o.vfs_cache_mb = r.vfs_cache_mb;
             o.from_cfg.insert("PS2X_VFS_CACHE_MB");
         }
+        if !o.hw_cpuframe && r.hw_cpuframe {
+            o.hw_cpuframe = true;
+            o.from_cfg.insert("PS2X_GS_HW_CPUFRAME");
+        }
+        if o.threads.is_none() && r.threads.is_some() {
+            o.threads = r.threads;
+            o.from_cfg.insert("PS2X_THREADS");
+        }
+        if o.hw_workers.is_none() && r.hw_workers.is_some() {
+            o.hw_workers = r.hw_workers;
+            o.from_cfg.insert("PS2X_GS_HW_WORKERS");
+        }
         if !o.widescreen && r.widescreen {
             o.widescreen = true;
             o.from_cfg.insert("PS2X_WIDESCREEN");
@@ -282,7 +306,7 @@ impl Settings {
     pub fn render(&self) -> String {
         let mut out = String::from(HEADER);
         let iso = self.iso.as_ref().map(|p| p.display().to_string());
-        let entries: [(&str, Option<String>, &str); 15] = [
+        let entries: [(&str, Option<String>, &str); 18] = [
             ("iso", iso, "Caminho da imagem do disco (ISO/BIN). Vazio = procurar pelo iso_glob na pasta do jogo."),
             ("profile", self.profile.map(|p| p.key().into()), "Perfil: original (cpu serial) | recommended (hw, escala 1, CRT off, cache auto) | deck (cpu-thread) | custom (usa as chaves abaixo)."),
             ("renderer", self.renderer.map(|r| r.key().into()), "Desenho (PS2X_GS): hw (padrao do perfil recomendado; GS por hardware em thread, o mais rapido) | cpu-thread (CPU em thread + faixas; alternativa se o hw falhar) | cpu (serial puro) | avancado: d3d11, hw-serial, cpu-bands. PS2X_GS no ambiente vence."),
@@ -296,6 +320,9 @@ impl Settings {
             ("bands", self.bands.map(|b| b.key()), "Faixas de rasterizacao (PS2X_GS_BANDS, so cpu-thread/cpu-bands; nunca com hw): auto | off | N (1..64). Comentado = padrao do runtime."),
             ("queue_kb", self.queue_kb.map(|n| n.to_string()), "Fila do GS em KiB (PS2X_GS_QUEUE_KB): 256..262144; 8192 reduz a latencia de exibicao. Comentado = padrao."),
             ("vfs_cache_mb", self.vfs_cache_mb.map(|n| n.to_string()), "Cache do VFS em MiB (PS2X_VFS_CACHE_MB): 0 desliga; comentado = automatico."),
+            ("hw_cpuframe", self.hw_cpuframe.map(|b| bool_text(b).into()), "Capturas de tela no hw (PS2X_GS_HW_CPUFRAME=1): so para capturas/regressao; LENTO; so hw/hw-serial: 0 | 1."),
+            ("threads", self.threads.map(|t| t.key().into()), "Threads experimentais (PS2X_THREADS): off | vu | vu-verify | iop. Em desenvolvimento; pode ser instavel. off/comentado = nada exportado."),
+            ("hw_workers", self.hw_workers.map(|n| n.to_string()), "Threads de trabalho do renderer hw (PS2X_GS_HW_WORKERS): 0 desliga; comentado = automatico; so hw/hw-serial."),
             ("widescreen", self.widescreen.map(|b| bool_text(b).into()), "Planejado (PS2X_WIDESCREEN): ainda sem efeito no runtime: 0 | 1."),
             ("show_window", self.show_window.map(|b| bool_text(b).into()), "1 = abrir esta janela ao iniciar; 0 = jogar direto (use --settings para reabrir)."),
         ];
@@ -338,7 +365,9 @@ fn default_text(key: &str) -> &'static str {
         "renderer" => "hw",
         "fps" => "60",
         "deck_fps" => "60",
-        "vsync" | "heartbeat" | "widescreen" => "0",
+        "vsync" | "heartbeat" | "widescreen" | "hw_cpuframe" => "0",
+        "threads" => "off",
+        "hw_workers" => "0",
         "internal_scale" => "1",
         "crt_strength" => "100",
         "bands" => "auto",
@@ -403,6 +432,9 @@ mod tests {
             crt_strength: Some(50),
             bands: Some(Bands::N(4)),
             queue_kb: Some(8192),
+            hw_cpuframe: Some(true),
+            threads: Some(Threads::VuVerify),
+            hw_workers: Some(2),
             vfs_cache_mb: Some(512),
             widescreen: Some(true),
             show_window: Some(true),

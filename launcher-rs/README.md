@@ -30,8 +30,11 @@ target\release\ps2launch-gui.exe --game ..\ghost_pc --check    # valida dump + p
 ```
 
 - Abas Jogar (imagem do disco, perfis Original/Recomendado/Steam Deck/Personalizado, dados
-  extraidos com botao Extrair e progresso), Imagem (`PS2X_GS`, `PS2X_TARGET_FPS`, `PS2X_GS_VSYNC`,
-  `PS2X_HEARTBEAT`; o que o runtime nao tem aparece "em breve") e Controles (so leitura).
+  extraidos com botao Extrair e progresso), Imagem (renderizador, resolucao interna, CRT, cache,
+  faixas, fila do GS, FPS, VSync, diagnostico e a secao recolhida "Opcoes avancadas": capturas de
+  tela, threads experimentais, workers do hw; Widescreen/Tela cheia aparecem "planejado"/"em breve")
+  e Controles (so leitura). Cada opcao e a variavel que ela exporta estao na tabela de "Opcoes e
+  variaveis" abaixo.
 - Jogar salva o `launcher.cfg`, inicia o port desacoplado e fecha a janela; se o port cair em ate
   1,5 s, a janela mostra o erro.
 - Teclado: Tab/Shift+Tab/setas, Espaco/Enter, Ctrl+Tab ou Q/E (abas), Enter sem foco = Jogar, Esc
@@ -70,7 +73,7 @@ se via. `vfs_cache_mb` vale em qualquer perfil.
 | avancado: `hw-serial` | o hw antigo, na thread do jogo | menor que `hw` |
 
 Ressalvas do `hw`: pequenas diferencas visuais (ex.: brilho de holofote) e capturas de tela pretas
-sem `PS2X_GS_HW_CPUFRAME=1` (so para regressao; lento; nao exposto no launcher).
+sem `--hw-cpuframe` (`PS2X_GS_HW_CPUFRAME=1`; so para capturas/regressao; lento).
 
 **Fallback hw -> cpu-thread:** se o `hw` nao iniciar, o runtime escreve `[gs-hw] ... using cpu` no log
 do jogo e segue na CPU (lento). O launcher le o log (8 s depois de abrir, ao fim e na checagem da
@@ -90,7 +93,10 @@ launcher registra o aviso quando ignora).
 | `--vfs-cache-mb N` | `vfs_cache_mb` | `PS2X_VFS_CACHE_MB` | 0..16384 MiB; 0 desliga; ausente = automatico (nada exportado) |
 | `--bands N\|auto\|off` | `bands` | `PS2X_GS_BANDS` | so cpu-thread/cpu-bands; off exporta 0; ausente = padrao do runtime |
 | `--queue-kb N` | `queue_kb` | `PS2X_GS_QUEUE_KB` | 256..262144; 8192 reduz a latencia de exibicao |
-| `--vsync` | `vsync` | `PS2X_GS_VSYNC` | hw e d3d11 |
+| `--vsync` | `vsync` | `PS2X_GS_VSYNC` | `1` so quando ligado. Efeito confirmado no runtime (`gs_backend_factory.cpp`): `Present(1, 0)` em hw, hw-serial e d3d11; nenhum nos renderizadores de CPU. Limita o FPS a taxa do monitor |
+| `--hw-cpuframe` | `hw_cpuframe` | `PS2X_GS_HW_CPUFRAME=1` | "capturas (lento)": cada apresentacao devolve tambem um quadro compondo na CPU para as capturas/regressao; so hw/hw-serial (ignorado com aviso nos demais) |
+| `--threads MODO` | `threads` | `PS2X_THREADS` | `off` (nada exportado), `vu`, `vu-verify`, `iop`. **Experimental** (em desenvolvimento; pode ser instavel); o launcher avisa no log ao exportar |
+| `--hw-workers N` | `hw_workers` | `PS2X_GS_HW_WORKERS` | 0..64; 0 desliga; ausente = automatico; so hw/hw-serial |
 | `--fps N` / `--fps-limit N` | `fps` | `PS2X_TARGET_FPS` | 0 = ilimitado (gasta uma thread do driver) |
 | `--widescreen` | `widescreen` | `PS2X_WIDESCREEN=1` | **planejado**: sem efeito no runtime ainda |
 | `--heartbeat` | `heartbeat` | `PS2X_HEARTBEAT` | diagnostico |
@@ -107,7 +113,9 @@ em segundo plano ao abrir. Avisa, sem bloquear, se RAM < 8 GiB ou VRAM < 4 GiB c
 d3d11, hw-serial, cpu-bands, cada um com a velocidade e a ressalva), resolucao interna 1x-8x (so hw),
 CRT (desligado/suave/medio/forte + forca 25-100 %), cache de arquivos (Automatico/Desligado/256-2048
 MB), threads de rasterizacao (Auto/Desligado/2/4/8, so cpu-thread/cpu-bands), fila do GS (padrao/8192/
-16384 KB), limite de FPS, VSync, diagnostico e Widescreen desabilitado ("planejado"). Tudo vai para o
+16384 KB), limite de FPS, VSync (so hw/d3d11), diagnostico, "Opcoes avancadas" (capturas de tela
+lento, so hw, com aviso; threads experimentais off/vu/vu-verify/iop com aviso "em desenvolvimento";
+workers do hw Auto/Desligado/2/4/8, so hw) e Widescreen desabilitado ("planejado"). Tudo vai para o
 `launcher.cfg`. Smoke: `ps2launch run --renderer hw --timeout 20` e `--renderer cpu-thread --timeout 20`.
 
 Tabela de edicao: `[[dump.file]]` no `game.toml` (nome, tamanho, sha256). `verify` confere os tamanhos pelo diretorio da imagem (rapido); `verify --deep` confere os hashes; `hashes` imprime o bloco a partir do manifesto (para uma edicao nova). Edicao desconhecida ou imagem truncada e RECUSADA.

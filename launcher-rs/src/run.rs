@@ -1,6 +1,6 @@
 //! Inicia o port: monta o ambiente (`PS2X_*`), redireciona a saida para `logs/run_*.log` e espera.
 use crate::{config::GameConfig, err, error::Result, info, log, warn};
-use crate::options::{self, Bands, Crt};
+use crate::options::{self, Bands, Crt, Threads};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -31,6 +31,12 @@ pub struct RunOptions {
     pub queue_kb: Option<u32>,
     /// Cache do VFS em MiB (`PS2X_VFS_CACHE_MB`); 0 desliga; `None` = automatico.
     pub vfs_cache_mb: Option<u32>,
+    /// Capturas de tela no hw (`PS2X_GS_HW_CPUFRAME=1`): lento; so hw/hw-serial.
+    pub hw_cpuframe: bool,
+    /// Threads experimentais (`PS2X_THREADS`); `Off`/ausente nao exporta nada.
+    pub threads: Option<Threads>,
+    /// Threads de trabalho do hw (`PS2X_GS_HW_WORKERS`); 0 desliga; `None` = automatico.
+    pub hw_workers: Option<u32>,
     /// Reservado (`PS2X_WIDESCREEN=1`): o runtime ainda nao tem efeito.
     pub widescreen: bool,
     /// Variaveis `PS2X_*` cujo valor veio do `launcher.cfg` (e nao da linha de comando): o
@@ -102,6 +108,24 @@ pub fn build_env_with(cfg: &GameConfig, o: &RunOptions, process_env: &dyn Fn(&st
         } else if n > 1 {
             warn!("escala interna {n} ignorada: so vale com hw (renderizador atual: {effective})");
         }
+    }
+    if o.hw_cpuframe {
+        if options::is_hw(&effective) {
+            put("PS2X_GS_HW_CPUFRAME", "1".into());
+        } else {
+            warn!("capturas (hw-cpuframe) ignoradas: so valem com hw/hw-serial (renderizador atual: {effective})");
+        }
+    }
+    if let Some(n) = o.hw_workers {
+        if options::is_hw(&effective) {
+            put("PS2X_GS_HW_WORKERS", n.to_string());
+        } else {
+            warn!("workers do hw ({n}) ignorados: so valem com hw/hw-serial (renderizador atual: {effective})");
+        }
+    }
+    if let Some(t) = o.threads.filter(|t| *t != Threads::Off) {
+        warn!("PS2X_THREADS={} e experimental (em desenvolvimento; pode ser instavel)", t.key());
+        put("PS2X_THREADS", t.key().into());
     }
     if let Some(b) = o.bands {
         if options::uses_bands(&effective) {
@@ -362,6 +386,24 @@ mod tests {
         assert_eq!(env["PS2X_POSTFX_CRT"], "0");
         assert!(!env.contains_key("PS2X_POSTFX_CRT_STRENGTH"));
         assert!(!env.contains_key("PS2X_VFS_CACHE_MB")); // ausente = automatico
+    }
+
+    #[test]
+    fn hw_extras_are_gated() {
+        let o = |r: &str| RunOptions {
+            renderer: Some(r.into()),
+            hw_cpuframe: true,
+            hw_workers: Some(0),
+            threads: Some(Threads::Vu),
+            ..Default::default()
+        };
+        let hw = build_env_with(&cfg(), &o("hw"), &no_env);
+        assert_eq!((hw["PS2X_GS_HW_CPUFRAME"].as_str(), hw["PS2X_GS_HW_WORKERS"].as_str(), hw["PS2X_THREADS"].as_str()), ("1", "0", "vu"));
+        let cpu = build_env_with(&cfg(), &o("cpu-thread"), &no_env);
+        assert!(!cpu.contains_key("PS2X_GS_HW_CPUFRAME") && !cpu.contains_key("PS2X_GS_HW_WORKERS"));
+        assert_eq!(cpu["PS2X_THREADS"], "vu");
+        let off = RunOptions { threads: Some(Threads::Off), ..Default::default() };
+        assert!(!build_env_with(&cfg(), &off, &no_env).contains_key("PS2X_THREADS"));
     }
 
     #[test]

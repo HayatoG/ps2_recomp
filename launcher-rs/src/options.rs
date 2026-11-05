@@ -85,6 +85,48 @@ impl Bands {
     }
 }
 
+/// Modo de threads experimentais do runtime (`PS2X_THREADS`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Threads {
+    Off,
+    Vu,
+    VuVerify,
+    Iop,
+}
+
+impl Threads {
+    pub const ALL: [Threads; 4] = [Threads::Off, Threads::Vu, Threads::VuVerify, Threads::Iop];
+
+    /// Texto do cfg/CLI e valor de `PS2X_THREADS`.
+    pub fn key(self) -> &'static str {
+        match self {
+            Threads::Off => "off",
+            Threads::Vu => "vu",
+            Threads::VuVerify => "vu-verify",
+            Threads::Iop => "iop",
+        }
+    }
+
+    pub fn parse(v: &str) -> Option<Threads> {
+        let v = v.trim().to_ascii_lowercase();
+        Threads::ALL.into_iter().find(|t| t.key() == v)
+    }
+}
+
+pub fn parse_threads(v: &str) -> Result<Threads> {
+    Threads::parse(v).ok_or_else(|| err!("modo de threads invalido '{v}': use off, vu, vu-verify ou iop"))
+}
+
+/// Teto de threads de trabalho do renderer hw (`PS2X_GS_HW_WORKERS`); 0 desliga.
+pub const HW_WORKERS_MAX: u32 = 64;
+
+pub fn parse_hw_workers(v: &str) -> Result<u32> {
+    match v.trim().parse::<u32>() {
+        Ok(n) if n <= HW_WORKERS_MAX => Ok(n),
+        _ => Err(err!("workers do hw invalidos '{v}': espera 0 (desliga) a {HW_WORKERS_MAX}")),
+    }
+}
+
 pub const BANDS_MAX: u32 = 64;
 pub const QUEUE_KB_RANGE: std::ops::RangeInclusive<u32> = 256..=262_144;
 
@@ -168,6 +210,16 @@ mod tests {
         assert!(parse_scale("0").is_err() && parse_scale("9").is_err() && parse_scale("x").is_err());
         assert_eq!(parse_cache_mb("0").unwrap(), 0);
         assert!(parse_cache_mb("16385").is_err() && parse_cache_mb("-1").is_err());
+    }
+
+    #[test]
+    fn threads_and_workers() {
+        assert_eq!(parse_threads("VU-Verify").unwrap(), Threads::VuVerify);
+        assert_eq!(Threads::Iop.key(), "iop");
+        assert!(parse_threads("all").is_err());
+        assert_eq!(parse_hw_workers("0").unwrap(), 0);
+        assert_eq!(parse_hw_workers("4").unwrap(), 4);
+        assert!(parse_hw_workers("65").is_err() && parse_hw_workers("-1").is_err() && parse_hw_workers("x").is_err());
     }
 
     #[test]

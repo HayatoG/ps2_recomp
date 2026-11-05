@@ -6,7 +6,7 @@ use super::theme::{self, size, P};
 use super::widgets::{self, Card, Chip};
 use super::worker::{Jobs, Msg};
 use crate::hw::{self, Hardware};
-use crate::options::{Bands, Crt};
+use crate::options::{Bands, Crt, Threads};
 use crate::settings::{Profile, Renderer, Settings, DECK_FPS_CHOICES, FPS_CHOICES};
 use crate::{assets, config::GameConfig, run};
 use eframe::egui::{self, pos2, vec2, Color32, Id, Key, Rect, RichText, Sense};
@@ -641,7 +641,7 @@ impl App {
         ui.add_space(6.0);
         let mut v = vsync;
         let why = (!is_hw && renderer != Renderer::D3d11).then_some(s.vsync_cpu_reason);
-        if widgets::toggle(ui, &mut v, s.vsync_label, why).changed() {
+        if widgets::toggle(ui, &mut v, s.vsync_label, why).on_hover_text(s.vsync_note).changed() {
             self.make_custom();
             self.settings.vsync = Some(v);
         }
@@ -650,6 +650,47 @@ impl App {
             self.settings.heartbeat = Some(hb);
             self.dirty = true;
         }
+        // --- opcoes avancadas / experimentais (sempre guardadas no cfg; so exportadas quando valem)
+        let adv_open = r.hw_cpuframe || r.threads.is_some_and(|t| t != Threads::Off) || r.hw_workers.is_some();
+        egui::CollapsingHeader::new(RichText::new(s.adv_opts_heading).font(theme::semibold(size::BODY)).color(P.muted))
+            .id_salt("ps2l-adv-opts")
+            .default_open(adv_open)
+            .show(ui, |ui| {
+                let mut cf = r.hw_cpuframe;
+                let why = (!is_hw).then_some(s.cpuframe_hw_only);
+                if widgets::toggle(ui, &mut cf, s.cpuframe_label, why).on_hover_text(s.cpuframe_note).changed() {
+                    self.settings.hw_cpuframe = Some(cf);
+                    self.dirty = true;
+                }
+                widgets::note(ui, s.cpuframe_note, P.warm);
+                widgets::heading(ui, s.threads_heading);
+                let opts: Vec<Chip<Threads>> = Threads::ALL
+                    .iter()
+                    .map(|t| Chip {
+                        value: *t,
+                        label: if *t == Threads::Off { s.threads_off } else { t.key() },
+                        badge: (*t != Threads::Off).then_some(s.badge_experimental),
+                        disabled: None,
+                    })
+                    .collect();
+                if let Some(v) = widgets::chips(ui, &opts, r.threads.unwrap_or(Threads::Off)) {
+                    self.settings.threads = Some(v);
+                    self.dirty = true;
+                }
+                widgets::note(ui, s.threads_note, P.warm);
+                widgets::heading(ui, s.hw_workers_heading);
+                let why = (!is_hw).then_some(s.hw_workers_only);
+                let labels: Vec<String> = [2u32, 4, 8].iter().map(|n| n.to_string()).collect();
+                let mut opts = vec![
+                    Chip { value: None, label: s.hw_workers_auto, badge: None, disabled: why },
+                    Chip { value: Some(0u32), label: s.hw_workers_off, badge: None, disabled: why },
+                ];
+                opts.extend([2u32, 4, 8].iter().zip(&labels).map(|(v, l)| Chip { value: Some(*v), label: l, badge: None, disabled: why }));
+                if let Some(v) = widgets::chips(ui, &opts, r.hw_workers) {
+                    self.settings.hw_workers = v;
+                    self.dirty = true;
+                }
+            });
         widgets::heading(ui, s.more_heading);
         let soon = [
             Chip { value: 0u8, label: s.widescreen_label, badge: Some(s.badge_planned), disabled: Some(s.widescreen_reason) },

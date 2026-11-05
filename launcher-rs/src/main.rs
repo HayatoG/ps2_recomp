@@ -35,10 +35,13 @@ OPCOES:
     --crt-strength P  forca do CRT em % (0..100; PS2X_POSTFX_CRT_STRENGTH)
     --bands N|auto|off  faixas de rasterizacao (PS2X_GS_BANDS; so cpu-thread/cpu-bands)
     --queue-kb N      fila do GS em KiB (PS2X_GS_QUEUE_KB; 8192 = menor latencia de exibicao)
+    --hw-cpuframe     capturas de tela no hw (PS2X_GS_HW_CPUFRAME=1; so para capturas/regressao; lento)
+    --threads MODO    threads experimentais: off | vu | vu-verify | iop (PS2X_THREADS; em desenvolvimento)
+    --hw-workers N    threads de trabalho do hw, 0 desliga (PS2X_GS_HW_WORKERS; so hw; ausente = auto)
     --fps-limit N     igual a --fps (0 = ilimitado: gasta uma thread do driver)
     --vfs-cache-mb N  cache do VFS em MiB (PS2X_VFS_CACHE_MB; 0 desliga; ausente = automatico)
     --widescreen      reservado (PS2X_WIDESCREEN=1): planejado, ainda sem efeito
-    --vsync           sincronia vertical do d3d11
+    --vsync           sincronia vertical (hw, hw-serial e d3d11)
     --heartbeat       uma linha por segundo com o estado do guest (diagnostico)
     --peek 0xA,0xB    enderecos do guest no heartbeat
     --timeout S       encerra o jogo apos S segundos
@@ -47,7 +50,7 @@ OPCOES:
 RENDERIZADORES (--renderer / renderer =), velocidade relativa medida no menu/abertura:
     hw          GS por hardware D3D11 em thread propria (~23 vsync/s, o mais rapido). Pequenas
                 diferencas visuais (ex.: brilho de holofote); capturas de tela saem pretas sem
-                PS2X_GS_HW_CPUFRAME=1 (so para regressao, lento). Se nao iniciar, o log do jogo traz
+                --hw-cpuframe (so para regressao, lento). Se nao iniciar, o log do jogo traz
                 '[gs-hw] ... using cpu' (o launcher avisa) -> use cpu-thread.
     cpu-thread  GS em thread + rasterizacao em faixas (~22 vsync/s); alternativa segura.
     cpu         CPU serial puro (~7 vsync/s); referencia.
@@ -109,6 +112,9 @@ fn parse(argv: Vec<String>) -> Result<Option<Cli>> {
             "--crt-strength" => cli.run.crt_strength = Some(options::parse_crt_strength(&next_value(&mut it, &a)?)?),
             "--bands" => cli.run.bands = Some(options::parse_bands(&next_value(&mut it, &a)?)?),
             "--queue-kb" => cli.run.queue_kb = Some(options::parse_queue_kb(&next_value(&mut it, &a)?)?),
+            "--hw-cpuframe" => cli.run.hw_cpuframe = true,
+            "--threads" => cli.run.threads = Some(options::parse_threads(&next_value(&mut it, &a)?)?),
+            "--hw-workers" => cli.run.hw_workers = Some(options::parse_hw_workers(&next_value(&mut it, &a)?)?),
             "--vsync" => cli.run.vsync = Some(true),
             "--peek" => cli.run.peek = Some(next_value(&mut it, &a)?),
             "--timeout" => cli.run.timeout_secs = Some(next_value(&mut it, &a)?.parse().map_err(|_| err!("--timeout espera um numero"))?),
@@ -248,5 +254,13 @@ mod tests {
         assert_eq!(c.run.bands, Some(options::Bands::Auto));
         assert_eq!((c.run.queue_kb, c.run.crt_strength, c.run.fps), (Some(8192), Some(60), Some(0)));
         assert_eq!(p(&["run", "--renderer", "cpu-serial"]).unwrap().unwrap().run.renderer.as_deref(), Some("cpu"));
+    }
+
+    #[test]
+    fn parses_hw_cpuframe_threads_workers() {
+        let c = p(&["run", "--hw-cpuframe", "--threads", "VU", "--hw-workers", "0"]).unwrap().unwrap();
+        assert!(c.run.hw_cpuframe);
+        assert_eq!((c.run.threads, c.run.hw_workers), (Some(options::Threads::Vu), Some(0)));
+        assert!(p(&["run", "--threads", "all"]).is_err() && p(&["run", "--hw-workers", "99"]).is_err());
     }
 }
