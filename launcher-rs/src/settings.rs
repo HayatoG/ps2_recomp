@@ -5,7 +5,7 @@
 //! - Precedencia: linha de comando > ambiente (`PS2X_*`) > `launcher.cfg` > `game.toml`
 //!   ([`Settings::apply`] marca o que veio do cfg; `run::build_env` deixa o ambiente vencer).
 //! - Chave desconhecida ou valor invalido vira aviso (nunca derruba o launcher).
-use crate::options::{self, Crt};
+use crate::options::{self, Bands, Crt};
 use crate::{error::Result, run::RunOptions};
 use std::path::{Path, PathBuf};
 
@@ -42,12 +42,16 @@ impl Profile {
 pub enum Renderer {
     /// Rasterizacao por software (padrao do runtime).
     Cpu,
-    /// Rasteriza na CPU em thread separada.
+    /// GS em thread propria + rasterizacao em faixas (~3x o `cpu`).
     CpuThread,
-    /// Backend Direct3D 11 atual (ROV).
+    /// Faixas sem thread de GS (avancado).
+    CpuBands,
+    /// Backend Direct3D 11 ROV (avancado).
     D3d11,
-    /// Renderer por hardware (em desenvolvimento).
+    /// GS por hardware D3D11 em thread propria (o mais rapido).
     Hw,
+    /// O hw antigo, na thread do jogo (avancado).
+    HwSerial,
 }
 
 impl Renderer {
@@ -55,17 +59,22 @@ impl Renderer {
         match self {
             Renderer::Cpu => "cpu",
             Renderer::CpuThread => "cpu-thread",
+            Renderer::CpuBands => "cpu-bands",
             Renderer::D3d11 => "d3d11",
             Renderer::Hw => "hw",
+            Renderer::HwSerial => "hw-serial",
         }
     }
 
     pub fn parse(v: &str) -> Option<Renderer> {
-        match v {
+        // Aceita os sinonimos (`cpu-serial`, `hw-thread`) via a validacao comum.
+        match crate::options::validate_renderer(v).ok()?.as_str() {
             "cpu" => Some(Renderer::Cpu),
             "cpu-thread" => Some(Renderer::CpuThread),
+            "cpu-bands" => Some(Renderer::CpuBands),
             "d3d11" => Some(Renderer::D3d11),
             "hw" => Some(Renderer::Hw),
+            "hw-serial" => Some(Renderer::HwSerial),
             _ => None,
         }
     }
@@ -87,7 +96,11 @@ pub struct Settings {
     pub heartbeat: Option<bool>,
     pub internal_scale: Option<u32>,
     pub crt: Option<Crt>,
+    /// Forca do CRT em percentual (0..100).
+    pub crt_strength: Option<u32>,
     pub vfs_cache_mb: Option<u32>,
+    pub bands: Option<Bands>,
+    pub queue_kb: Option<u32>,
     pub widescreen: Option<bool>,
     /// `false` faz o launcher sem argumentos jogar direto (como `--no-window`).
     pub show_window: Option<bool>,
@@ -102,7 +115,10 @@ pub struct Resolved {
     pub heartbeat: bool,
     pub internal_scale: Option<u32>,
     pub crt: Option<Crt>,
+    pub crt_strength: Option<u32>,
     pub vfs_cache_mb: Option<u32>,
+    pub bands: Option<Bands>,
+    pub queue_kb: Option<u32>,
     pub widescreen: bool,
 }
 
@@ -151,6 +167,9 @@ impl Settings {
                 "heartbeat" => parse_bool(&lower).map(|b| s.heartbeat = Some(b)).is_some(),
                 "internal_scale" => options::parse_scale(&lower).ok().map(|n| s.internal_scale = Some(n)).is_some(),
                 "crt" => options::parse_crt(&lower).ok().map(|c| s.crt = Some(c)).is_some(),
+                "crt_strength" => options::parse_crt_strength(&lower).ok().map(|n| s.crt_strength = Some(n)).is_some(),
+                "bands" => options::parse_bands(&lower).ok().map(|b| s.bands = Some(b)).is_some(),
+                "queue_kb" => options::parse_queue_kb(&lower).ok().map(|n| s.queue_kb = Some(n)).is_some(),
                 "vfs_cache_mb" => options::parse_cache_mb(&lower).ok().map(|n| s.vfs_cache_mb = Some(n)).is_some(),
                 "widescreen" => parse_bool(&lower).map(|b| s.widescreen = Some(b)).is_some(),
                 "show_window" => parse_bool(&lower).map(|b| s.show_window = Some(b)).is_some(),
@@ -176,21 +195,31 @@ impl Settings {
             ..Default::default()
         };
         match self.profile {
-            Some(Profile::Original) | Some(Profile::Recommended) => {
-                Resolved { renderer: Some(Renderer::Cpu), fps: Some(60), vsync: Some(false), ..base }
-            }
+            Some(Profile::Original) => Resolved { renderer: Some(Renderer::Cpu), fps: Some(60), vsync: Some(false), ..base },
+            // Sem perfil = recomendado: hw, escala 1, CRT desligado, cache automatico.
+            Some(Profile::Recommended) | None => Resolved {
+                renderer: Some(Renderer::Hw),
+                fps: Some(60),
+                vsync: Some(false),
+                internal_scale: Some(1),
+                crt: Some(Crt::Off),
+                ..base
+            },
             Some(Profile::Deck) => Resolved {
-                renderer: Some(Renderer::Cpu),
+                renderer: Some(Renderer::CpuThread),
                 fps: Some(self.deck_fps.unwrap_or(60)),
                 vsync: Some(false),
                 ..base
             },
-            Some(Profile::Custom) | None => Resolved {
+            Some(Profile::Custom) => Resolved {
                 renderer: self.renderer,
                 fps: self.fps,
                 vsync: self.vsync,
                 internal_scale: self.internal_scale,
                 crt: self.crt,
+                crt_strength: self.crt_strength,
+                bands: self.bands,
+                queue_kb: self.queue_kb,
                 widescreen: self.widescreen.unwrap_or(false),
                 ..base
             },
@@ -227,6 +256,18 @@ impl Settings {
             o.crt = r.crt;
             o.from_cfg.extend(["PS2X_POSTFX_CRT", "PS2X_POSTFX_CRT_STRENGTH"]);
         }
+        if o.crt_strength.is_none() && r.crt_strength.is_some() {
+            o.crt_strength = r.crt_strength;
+            o.from_cfg.insert("PS2X_POSTFX_CRT_STRENGTH");
+        }
+        if o.bands.is_none() && r.bands.is_some() {
+            o.bands = r.bands;
+            o.from_cfg.insert("PS2X_GS_BANDS");
+        }
+        if o.queue_kb.is_none() && r.queue_kb.is_some() {
+            o.queue_kb = r.queue_kb;
+            o.from_cfg.insert("PS2X_GS_QUEUE_KB");
+        }
         if o.vfs_cache_mb.is_none() && r.vfs_cache_mb.is_some() {
             o.vfs_cache_mb = r.vfs_cache_mb;
             o.from_cfg.insert("PS2X_VFS_CACHE_MB");
@@ -241,16 +282,19 @@ impl Settings {
     pub fn render(&self) -> String {
         let mut out = String::from(HEADER);
         let iso = self.iso.as_ref().map(|p| p.display().to_string());
-        let entries: [(&str, Option<String>, &str); 12] = [
+        let entries: [(&str, Option<String>, &str); 15] = [
             ("iso", iso, "Caminho da imagem do disco (ISO/BIN). Vazio = procurar pelo iso_glob na pasta do jogo."),
-            ("profile", self.profile.map(|p| p.key().into()), "Perfil: original | recommended | deck | custom (custom usa renderer/fps/vsync abaixo)."),
-            ("renderer", self.renderer.map(|r| r.key().into()), "Desenho (PS2X_GS): cpu (padrao) | cpu-thread | d3d11 (backend ROV atual) | hw (por hardware, em desenvolvimento). PS2X_GS no ambiente vence."),
+            ("profile", self.profile.map(|p| p.key().into()), "Perfil: original (cpu serial) | recommended (hw, escala 1, CRT off, cache auto) | deck (cpu-thread) | custom (usa as chaves abaixo)."),
+            ("renderer", self.renderer.map(|r| r.key().into()), "Desenho (PS2X_GS): hw (padrao do perfil recomendado; GS por hardware em thread, o mais rapido) | cpu-thread (CPU em thread + faixas; alternativa se o hw falhar) | cpu (serial puro) | avancado: d3d11, hw-serial, cpu-bands. PS2X_GS no ambiente vence."),
             ("fps", self.fps.map(|f| f.to_string()), "Limite de FPS: 30 | 50 | 60 | 0 (0 = ilimitado)."),
             ("deck_fps", self.deck_fps.map(|f| f.to_string()), "Limite do perfil Steam Deck: 30 | 40 | 60."),
             ("vsync", self.vsync.map(|b| bool_text(b).into()), "Sincronia vertical do Direct3D 11 (PS2X_GS_VSYNC): 0 | 1."),
             ("heartbeat", self.heartbeat.map(|b| bool_text(b).into()), "Diagnostico: uma linha por segundo no log do jogo (PS2X_HEARTBEAT): 0 | 1."),
             ("internal_scale", self.internal_scale.map(|n| n.to_string()), "Resolucao interna do renderer hw (PS2X_GS_SCALE): 1..8 (padrao 1). Escala > 2 pede RAM >= 8 GiB e VRAM >= 4 GiB."),
             ("crt", self.crt.map(|c| c.key().into()), "Filtro CRT (PS2X_POSTFX_CRT, _STRENGTH): off | suave | medio | forte."),
+            ("crt_strength", self.crt_strength.map(|n| n.to_string()), "Forca do CRT em % (PS2X_POSTFX_CRT_STRENGTH): 0..100; comentado = a do nivel."),
+            ("bands", self.bands.map(|b| b.key()), "Faixas de rasterizacao (PS2X_GS_BANDS, so cpu-thread/cpu-bands; nunca com hw): auto | off | N (1..64). Comentado = padrao do runtime."),
+            ("queue_kb", self.queue_kb.map(|n| n.to_string()), "Fila do GS em KiB (PS2X_GS_QUEUE_KB): 256..262144; 8192 reduz a latencia de exibicao. Comentado = padrao."),
             ("vfs_cache_mb", self.vfs_cache_mb.map(|n| n.to_string()), "Cache do VFS em MiB (PS2X_VFS_CACHE_MB): 0 desliga; comentado = automatico."),
             ("widescreen", self.widescreen.map(|b| bool_text(b).into()), "Planejado (PS2X_WIDESCREEN): ainda sem efeito no runtime: 0 | 1."),
             ("show_window", self.show_window.map(|b| bool_text(b).into()), "1 = abrir esta janela ao iniciar; 0 = jogar direto (use --settings para reabrir)."),
@@ -291,11 +335,14 @@ const HEADER: &str = "# launcher.cfg - preferencias do ps2launch (chave = valor;
 fn default_text(key: &str) -> &'static str {
     match key {
         "profile" => "recommended",
-        "renderer" => "cpu",
+        "renderer" => "hw",
         "fps" => "60",
         "deck_fps" => "60",
         "vsync" | "heartbeat" | "widescreen" => "0",
         "internal_scale" => "1",
+        "crt_strength" => "100",
+        "bands" => "auto",
+        "queue_kb" => "8192",
         "crt" => "off",
         "vfs_cache_mb" => "256",
         "show_window" => "1",
@@ -353,6 +400,9 @@ mod tests {
             heartbeat: Some(false),
             internal_scale: Some(4),
             crt: Some(Crt::Suave),
+            crt_strength: Some(50),
+            bands: Some(Bands::N(4)),
+            queue_kb: Some(8192),
             vfs_cache_mb: Some(512),
             widescreen: Some(true),
             show_window: Some(true),
@@ -371,7 +421,12 @@ mod tests {
         let r = s.resolve();
         assert_eq!((r.fps, r.renderer), (Some(30), Some(Renderer::D3d11)));
         s.profile = Some(Profile::Recommended);
-        assert_eq!(s.resolve().renderer, Some(Renderer::Cpu));
+        assert_eq!(s.resolve().renderer, Some(Renderer::Hw));
+        s.profile = Some(Profile::Deck);
+        assert_eq!(s.resolve().renderer, Some(Renderer::CpuThread));
+        s.profile = Some(Profile::Original);
+        let r = s.resolve();
+        assert_eq!((r.renderer, r.internal_scale, r.crt), (Some(Renderer::Cpu), None, None));
     }
 
     #[test]
@@ -387,10 +442,11 @@ mod tests {
         let mut o = RunOptions::default();
         s.apply(&mut o);
         assert_eq!(o.fps, Some(30));
-        // Sem cfg nem flag, nada e definido (vale o padrao do game.toml/runtime).
+        // Sem cfg nem flag: perfil recomendado (hw, escala 1, CRT desligado, cache automatico).
         let mut o = RunOptions::default();
         Settings::default().apply(&mut o);
-        assert_eq!((o.fps, o.renderer, o.vsync), (None, None, None));
+        assert_eq!((o.fps, o.renderer.as_deref(), o.internal_scale), (Some(60), Some("hw"), Some(1)));
+        assert_eq!((o.crt, o.vfs_cache_mb, o.bands), (Some(Crt::Off), None, None));
     }
 
     #[test]
@@ -411,6 +467,29 @@ mod tests {
         let (s, _) = Settings::parse("profile = recommended\ninternal_scale = 4\nvfs_cache_mb = 256\n");
         let mut o = RunOptions::default();
         s.apply(&mut o);
-        assert_eq!((o.internal_scale, o.vfs_cache_mb), (None, Some(256)));
+        assert_eq!((o.internal_scale, o.vfs_cache_mb), (Some(1), Some(256))); // escala fixa do perfil
+    }
+
+    #[test]
+    fn advanced_keys_and_aliases() {
+        let (s, w) = Settings::parse("profile = custom
+renderer = hw-thread
+bands = auto
+queue_kb = 8192
+crt = medio
+crt_strength = 50
+");
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!((s.renderer, s.bands, s.queue_kb, s.crt_strength), (Some(Renderer::Hw), Some(Bands::Auto), Some(8192), Some(50)));
+        let (s, _) = Settings::parse("renderer = cpu-serial
+");
+        assert_eq!(s.renderer, Some(Renderer::Cpu));
+        let (s, w) = Settings::parse("bands = 99
+queue_kb = 1
+crt_strength = 200
+renderer = hw-fast
+");
+        assert_eq!((s.bands, s.queue_kb, s.crt_strength, s.renderer), (None, None, None, None));
+        assert_eq!(w.len(), 4);
     }
 }

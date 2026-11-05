@@ -33,26 +33,93 @@ impl Crt {
         let v = v.to_ascii_lowercase();
         Crt::ALL.into_iter().find(|c| c.key() == v)
     }
+}
 
-    /// Valor de `PS2X_POSTFX_CRT_STRENGTH` (0..1). Tabela unica: ajustar aqui se o runtime
-    /// pedir outra escala.
-    pub fn strength(self) -> Option<&'static str> {
+/// Backend de desenho aceito em `--renderer` / `renderer =`. Devolve o valor canonico de
+/// `PS2X_GS` (`cpu-serial` vira `cpu`; `hw-thread` vira `hw`).
+pub fn validate_renderer(v: &str) -> Result<String> {
+    let v = v.trim().to_ascii_lowercase();
+    match v.as_str() {
+        "cpu" | "cpu-serial" => Ok("cpu".into()),
+        "hw" | "hw-thread" => Ok("hw".into()),
+        "cpu-thread" | "cpu-bands" | "d3d11" | "hw-serial" => Ok(v),
+        _ => Err(err!("renderizador invalido '{v}': use cpu, cpu-thread, hw (avancado: cpu-bands, d3d11, hw-serial)")),
+    }
+}
+
+/// Renderizadores por hardware (aceitam `PS2X_GS_SCALE`).
+pub fn is_hw(renderer: &str) -> bool {
+    matches!(renderer, "hw" | "hw-serial" | "hw-thread")
+}
+
+/// Renderizadores com rasterizacao em faixas (aceitam `PS2X_GS_BANDS`; nunca junto com `hw`).
+pub fn uses_bands(renderer: &str) -> bool {
+    matches!(renderer, "cpu-thread" | "cpu-bands")
+}
+
+/// Faixas de rasterizacao (`PS2X_GS_BANDS`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bands {
+    Auto,
+    Off,
+    N(u32),
+}
+
+impl Bands {
+    /// Texto do cfg/CLI.
+    pub fn key(self) -> String {
         match self {
-            Crt::Off => None,
-            Crt::Suave => Some("0.35"),
-            Crt::Medio => Some("0.65"),
-            Crt::Forte => Some("1.0"),
+            Bands::Auto => "auto".into(),
+            Bands::Off => "off".into(),
+            Bands::N(n) => n.to_string(),
+        }
+    }
+
+    /// Valor de `PS2X_GS_BANDS` (0 desliga).
+    pub fn env(self) -> String {
+        match self {
+            Bands::Auto => "auto".into(),
+            Bands::Off => "0".into(),
+            Bands::N(n) => n.to_string(),
         }
     }
 }
 
-/// Backend de desenho aceito em `--renderer` / `renderer =` (valor de `PS2X_GS`).
-pub fn validate_renderer(v: &str) -> Result<String> {
-    let v = v.trim().to_ascii_lowercase();
-    match v.as_str() {
-        "cpu" | "cpu-thread" | "d3d11" | "hw" => Ok(v),
-        _ => Err(err!("renderizador invalido '{v}': use cpu, cpu-thread, d3d11 ou hw")),
+pub const BANDS_MAX: u32 = 64;
+pub const QUEUE_KB_RANGE: std::ops::RangeInclusive<u32> = 256..=262_144;
+
+pub fn parse_bands(v: &str) -> Result<Bands> {
+    match v.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(Bands::Auto),
+        "off" | "0" | "nao" => Ok(Bands::Off),
+        t => match t.parse::<u32>() {
+            Ok(n) if (1..=BANDS_MAX).contains(&n) => Ok(Bands::N(n)),
+            _ => Err(err!("faixas invalidas '{v}': use auto, off ou um inteiro de 1 a {BANDS_MAX}")),
+        },
     }
+}
+
+pub fn parse_queue_kb(v: &str) -> Result<u32> {
+    let n: u32 = v.trim().parse().map_err(|_| err!("fila do GS invalida '{v}': espera KiB inteiros"))?;
+    if QUEUE_KB_RANGE.contains(&n) {
+        Ok(n)
+    } else {
+        Err(err!("fila do GS {n} KiB fora da faixa {}..{}", QUEUE_KB_RANGE.start(), QUEUE_KB_RANGE.end()))
+    }
+}
+
+/// Forca do CRT em percentual (0..100).
+pub fn parse_crt_strength(v: &str) -> Result<u32> {
+    match v.trim().trim_end_matches('%').parse::<u32>() {
+        Ok(n) if n <= 100 => Ok(n),
+        _ => Err(err!("forca do CRT invalida '{v}': espera 0 a 100 (percentual)")),
+    }
+}
+
+/// `PS2X_POSTFX_CRT_STRENGTH` a partir do percentual: sempre fracao `0.00..1.00` (sem ambiguidade
+/// com a regra "valor <= 1 = fracao" do runtime).
+pub fn crt_strength_env(percent: u32) -> String {
+    format!("{:.2}", percent as f64 / 100.0)
 }
 
 pub fn parse_scale(v: &str) -> Result<u32> {
@@ -83,10 +150,13 @@ mod tests {
 
     #[test]
     fn renderer_validation() {
-        for ok in ["cpu", "CPU-Thread", "d3d11", " hw "] {
+        for ok in ["cpu", "CPU-Thread", "d3d11", " hw ", "cpu-bands", "hw-serial"] {
             assert!(validate_renderer(ok).is_ok(), "{ok}");
         }
         assert_eq!(validate_renderer("HW").unwrap(), "hw");
+        assert_eq!(validate_renderer("hw-thread").unwrap(), "hw");
+        assert_eq!(validate_renderer("cpu-serial").unwrap(), "cpu");
+        assert!(is_hw("hw-serial") && !is_hw("cpu-thread") && uses_bands("cpu-bands") && !uses_bands("hw"));
         let e = validate_renderer("vulkan").unwrap_err().to_string();
         assert!(e.contains("cpu-thread") && e.contains("hw"));
     }
@@ -104,6 +174,21 @@ mod tests {
     fn crt_levels() {
         assert_eq!(parse_crt("Forte").unwrap(), Crt::Forte);
         assert!(parse_crt("max").is_err());
-        assert_eq!(Crt::Off.strength(), None);
+    }
+
+    #[test]
+    fn bands_queue_strength() {
+        assert_eq!(parse_bands("AUTO").unwrap(), Bands::Auto);
+        assert_eq!(parse_bands("off").unwrap(), Bands::Off);
+        assert_eq!(parse_bands("0").unwrap(), Bands::Off);
+        assert_eq!(parse_bands("8").unwrap().env(), "8");
+        assert_eq!(Bands::Off.env(), "0");
+        assert!(parse_bands("65").is_err() && parse_bands("x").is_err());
+        assert_eq!(parse_queue_kb("8192").unwrap(), 8192);
+        assert!(parse_queue_kb("1").is_err());
+        assert_eq!(parse_crt_strength("50%").unwrap(), 50);
+        assert!(parse_crt_strength("101").is_err());
+        assert_eq!(crt_strength_env(100), "1.00");
+        assert_eq!(crt_strength_env(35), "0.35");
     }
 }

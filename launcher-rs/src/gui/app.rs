@@ -5,11 +5,14 @@ use super::strings::{self, fill, Strings};
 use super::theme::{self, size, P};
 use super::widgets::{self, Card, Chip};
 use super::worker::{Jobs, Msg};
+use crate::hw::{self, Hardware};
+use crate::options::{Bands, Crt};
 use crate::settings::{Profile, Renderer, Settings, DECK_FPS_CHOICES, FPS_CHOICES};
 use crate::{assets, config::GameConfig, run};
 use eframe::egui::{self, pos2, vec2, Color32, Id, Key, Rect, RichText, Sense};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -61,6 +64,8 @@ pub struct App {
     text_id: Option<Id>,
     jobs: Jobs,
     rx: Receiver<Msg>,
+    /// RAM/VRAM, detectadas em segundo plano ao abrir a janela.
+    hw: Arc<OnceLock<Hardware>>,
 }
 
 impl App {
@@ -97,7 +102,14 @@ impl App {
             text_id: None,
             jobs,
             rx,
+            hw: Arc::new(OnceLock::new()),
         };
+        let slot = app.hw.clone();
+        let ctx = cc.egui_ctx.clone();
+        std::thread::spawn(move || {
+            let _ = slot.set(hw::detect(true));
+            ctx.request_repaint();
+        });
         app.start_verify();
         app.jobs.status(app.cfg.clone());
         app
@@ -279,12 +291,17 @@ impl App {
 
     /// Editar uma opcao da aba Imagem passa o perfil para Personalizado, mantendo o que se via.
     fn make_custom(&mut self) {
-        let (_, renderer, fps, vsync) = self.effective();
+        let r = self.settings.resolve();
         let s = &mut self.settings;
         s.profile = Some(Profile::Custom);
-        s.renderer = Some(renderer);
-        s.fps = Some(fps);
-        s.vsync = Some(vsync);
+        s.renderer = r.renderer.or(s.renderer);
+        s.fps = r.fps.or(s.fps);
+        s.vsync = r.vsync.or(s.vsync);
+        s.internal_scale = r.internal_scale;
+        s.crt = r.crt;
+        s.crt_strength = r.crt_strength;
+        s.bands = r.bands;
+        s.queue_kb = r.queue_kb;
         self.dirty = true;
     }
 
@@ -475,32 +492,142 @@ impl App {
     fn draw_picture(&mut self, ui: &mut egui::Ui) {
         let s = self.s;
         let (profile, renderer, fps, vsync) = self.effective();
+        let r = self.settings.resolve();
+        let rkey = renderer.key();
+        let is_hw = crate::options::is_hw(rkey);
+        let uses_bands = crate::options::uses_bands(rkey);
         if profile != Profile::Custom {
             widgets::note(ui, s.picture_profile_note, P.muted);
             ui.add_space(2.0);
         }
+        // --- renderizador
         widgets::heading(ui, s.renderer_heading);
-        // Valor "falso" para os renderers que ainda nao existem (nunca selecionaveis).
-        #[derive(Clone, Copy, PartialEq)]
-        enum R {
-            Real(Renderer),
-            Soon,
-        }
-        let opts = [
-            Chip { value: R::Real(Renderer::Cpu), label: s.renderer_cpu, badge: None, disabled: None },
-            Chip { value: R::Real(Renderer::CpuThread), label: s.renderer_cpu_thread, badge: Some(s.badge_experimental), disabled: None },
-            Chip { value: R::Real(Renderer::D3d11), label: s.renderer_d3d11, badge: Some(s.badge_experimental), disabled: None },
-            Chip { value: R::Real(Renderer::Hw), label: s.renderer_hw, badge: Some(s.badge_experimental), disabled: None },
-            Chip { value: R::Soon, label: s.renderer_vulkan, badge: Some(s.badge_soon), disabled: Some(s.soon_reason) },
-            Chip { value: R::Soon, label: s.renderer_d3d12, badge: Some(s.badge_soon), disabled: Some(s.soon_reason) },
+        let main = [
+            Chip { value: Renderer::Hw, label: s.renderer_hw, badge: Some(s.badge_fastest), disabled: None },
+            Chip { value: Renderer::CpuThread, label: s.renderer_cpu_thread, badge: None, disabled: None },
+            Chip { value: Renderer::Cpu, label: s.renderer_cpu, badge: None, disabled: None },
         ];
-        if let Some(R::Real(r)) = widgets::chips(ui, &opts, R::Real(renderer)) {
+        let mut pick = widgets::chips(ui, &main, renderer);
+        let advanced = [Renderer::D3d11, Renderer::HwSerial, Renderer::CpuBands].contains(&renderer);
+        egui::CollapsingHeader::new(RichText::new(s.advanced_heading).font(theme::semibold(size::BODY)).color(P.muted))
+            .id_salt("ps2l-adv")
+            .default_open(advanced)
+            .show(ui, |ui| {
+                let adv = [
+                    Chip { value: Renderer::D3d11, label: s.renderer_d3d11, badge: None, disabled: None },
+                    Chip { value: Renderer::HwSerial, label: s.renderer_hw_serial, badge: None, disabled: None },
+                    Chip { value: Renderer::CpuBands, label: s.renderer_cpu_bands, badge: None, disabled: None },
+                ];
+                pick = pick.or(widgets::chips(ui, &adv, renderer));
+            });
+        if let Some(r) = pick {
             self.make_custom();
             self.settings.renderer = Some(r);
         }
-        if renderer == Renderer::D3d11 {
-            widgets::note(ui, s.d3d11_warning, P.warn);
+        let (note, color) = match renderer {
+            Renderer::Hw => (s.note_hw, P.muted),
+            Renderer::CpuThread => (s.note_cpu_thread, P.muted),
+            Renderer::Cpu => (s.note_cpu, P.muted),
+            Renderer::CpuBands => (s.note_cpu_bands, P.muted),
+            Renderer::HwSerial => (s.note_hw_serial, P.muted),
+            Renderer::D3d11 => (s.d3d11_warning, P.warn),
+        };
+        widgets::note(ui, note, color);
+
+        // --- resolucao interna (so hw)
+        widgets::heading(ui, s.scale_heading);
+        let scale = r.internal_scale.unwrap_or(1);
+        let why = (!is_hw).then_some(s.scale_only_hw);
+        let labels: Vec<String> = (1..=8u32).map(|n| format!("{n}x")).collect();
+        let opts: Vec<Chip<u32>> = (1..=8u32).zip(&labels).map(|(v, l)| Chip { value: v, label: l, badge: None, disabled: why }).collect();
+        if let Some(v) = widgets::chips(ui, &opts, scale) {
+            self.make_custom();
+            self.settings.internal_scale = Some(v);
         }
+        widgets::note(ui, s.scale_note, P.muted);
+        match self.hw.get() {
+            Some(h) => {
+                if is_hw {
+                    if let Some(v) = h.vram.filter(|v| *v >= 6 << 30) {
+                        if scale <= 1 {
+                            widgets::note(ui, &fill(s.scale_recommend, &[&gb(v)]), P.accent);
+                        }
+                    }
+                    for line in h.warnings(Some(scale), self.settings.vfs_cache_mb) {
+                        let msg = if line.starts_with("VRAM") { s.scale_warn_vram } else { s.scale_warn_ram };
+                        widgets::note(ui, msg, P.warn);
+                    }
+                }
+                widgets::note(ui, &h.summary(), P.muted);
+            }
+            None => {
+                widgets::note(ui, s.hw_detecting, P.muted);
+            }
+        }
+
+        // --- CRT
+        widgets::heading(ui, s.crt_heading);
+        let crt = r.crt.unwrap_or(Crt::Off);
+        let labels = [s.crt_off, s.crt_suave, s.crt_medio, s.crt_forte];
+        let opts: Vec<Chip<Crt>> = Crt::ALL.iter().zip(labels).map(|(c, l)| Chip { value: *c, label: l, badge: None, disabled: None }).collect();
+        if let Some(v) = widgets::chips(ui, &opts, crt) {
+            self.make_custom();
+            self.settings.crt = Some(v);
+        }
+        if crt != Crt::Off {
+            ui.label(RichText::new(s.crt_strength_label).font(theme::body(size::NOTE)).color(P.muted));
+            let labels: Vec<String> = [25u32, 50, 75, 100].iter().map(|n| format!("{n}%")).collect();
+            let mut opts = vec![Chip { value: None, label: s.crt_strength_level, badge: None, disabled: None }];
+            opts.extend([25u32, 50, 75, 100].iter().zip(&labels).map(|(v, l)| Chip { value: Some(*v), label: l, badge: None, disabled: None }));
+            if let Some(v) = widgets::chips(ui, &opts, r.crt_strength) {
+                self.make_custom();
+                self.settings.crt_strength = v;
+            }
+        }
+        widgets::note(ui, s.crt_note, P.muted);
+
+        // --- cache de arquivos (independe do perfil)
+        widgets::heading(ui, s.cache_heading);
+        let mut opts = vec![
+            Chip { value: None, label: s.cache_auto, badge: None, disabled: None },
+            Chip { value: Some(0u32), label: s.cache_off, badge: None, disabled: None },
+        ];
+        let labels: Vec<String> = [256u32, 512, 1024, 2048].iter().map(|n| format!("{n} MB")).collect();
+        opts.extend([256u32, 512, 1024, 2048].iter().zip(&labels).map(|(v, l)| Chip { value: Some(*v), label: l, badge: None, disabled: None }));
+        if let Some(v) = widgets::chips(ui, &opts, self.settings.vfs_cache_mb) {
+            self.settings.vfs_cache_mb = v;
+            self.dirty = true;
+        }
+        widgets::note(ui, s.cache_note, P.muted);
+
+        // --- rasterizacao em faixas (so cpu-thread / cpu-bands)
+        widgets::heading(ui, s.bands_heading);
+        let why = (!uses_bands).then_some(s.bands_only);
+        let labels: Vec<String> = [2u32, 4, 8].iter().map(|n| n.to_string()).collect();
+        let mut opts = vec![
+            Chip { value: Bands::Auto, label: s.bands_auto, badge: None, disabled: why },
+            Chip { value: Bands::Off, label: s.bands_off, badge: None, disabled: why },
+        ];
+        opts.extend([2u32, 4, 8].iter().zip(&labels).map(|(v, l)| Chip { value: Bands::N(*v), label: l, badge: None, disabled: why }));
+        if let Some(v) = widgets::chips(ui, &opts, r.bands.unwrap_or(Bands::Auto)) {
+            self.make_custom();
+            self.settings.bands = Some(v);
+        }
+
+        // --- fila do GS
+        widgets::heading(ui, s.queue_heading);
+        let opts = [
+            Chip { value: None, label: s.queue_default, badge: None, disabled: None },
+            Chip { value: Some(8192u32), label: "8192 KB", badge: None, disabled: None },
+            Chip { value: Some(16384u32), label: "16384 KB", badge: None, disabled: None },
+        ];
+        if let Some(v) = widgets::chips(ui, &opts, r.queue_kb) {
+            self.make_custom();
+            self.settings.queue_kb = v;
+        }
+        widgets::note(ui, s.queue_note, P.muted);
+
+        // --- FPS, vsync, diagnostico
         widgets::heading(ui, s.fps_heading);
         let labels: Vec<String> = FPS_CHOICES.iter().map(|f| if *f == 0 { s.fps_unlimited.to_string() } else { f.to_string() }).collect();
         let opts: Vec<Chip<u32>> = FPS_CHOICES.iter().zip(&labels).map(|(v, l)| Chip { value: *v, label: l, badge: None, disabled: None }).collect();
@@ -508,9 +635,12 @@ impl App {
             self.make_custom();
             self.settings.fps = Some(v);
         }
+        if fps == 0 {
+            widgets::note(ui, s.fps_unlimited_note, P.muted);
+        }
         ui.add_space(6.0);
         let mut v = vsync;
-        let why = (renderer != Renderer::D3d11).then_some(s.vsync_cpu_reason);
+        let why = (!is_hw && renderer != Renderer::D3d11).then_some(s.vsync_cpu_reason);
         if widgets::toggle(ui, &mut v, s.vsync_label, why).changed() {
             self.make_custom();
             self.settings.vsync = Some(v);
@@ -522,7 +652,7 @@ impl App {
         }
         widgets::heading(ui, s.more_heading);
         let soon = [
-            Chip { value: 0u8, label: s.internal_res, badge: Some(s.badge_soon), disabled: Some(s.soon_reason) },
+            Chip { value: 0u8, label: s.widescreen_label, badge: Some(s.badge_planned), disabled: Some(s.widescreen_reason) },
             Chip { value: 1u8, label: s.fullscreen, badge: Some(s.badge_soon), disabled: Some(s.soon_reason) },
         ];
         widgets::chips(ui, &soon, u8::MAX);

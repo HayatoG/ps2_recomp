@@ -29,9 +29,13 @@ OPCOES:
     --fps-log CSV     grava o FPS por segundo
     --shot-dir DIR    pasta dos PNG do comando 'shot' do pad virtual
     --missing-log ARQ registra alvos de desvio sem funcao gerada
-    --renderer R      desenho (PS2X_GS): cpu (padrao) | cpu-thread | d3d11 | hw (em desenvolvimento)
+    --renderer R      desenho (PS2X_GS), veja a tabela abaixo (padrao do perfil recomendado: hw)
     --internal-scale N  resolucao interna do renderer hw, 1..8 (PS2X_GS_SCALE; padrao 1)
-    --crt [NIVEL]     filtro CRT: off | suave | medio | forte (sem NIVEL = medio)
+    --crt [NIVEL]     filtro CRT: off | suave | medio | forte (sem NIVEL = medio; F9 liga/desliga no jogo)
+    --crt-strength P  forca do CRT em % (0..100; PS2X_POSTFX_CRT_STRENGTH)
+    --bands N|auto|off  faixas de rasterizacao (PS2X_GS_BANDS; so cpu-thread/cpu-bands)
+    --queue-kb N      fila do GS em KiB (PS2X_GS_QUEUE_KB; 8192 = menor latencia de exibicao)
+    --fps-limit N     igual a --fps (0 = ilimitado: gasta uma thread do driver)
     --vfs-cache-mb N  cache do VFS em MiB (PS2X_VFS_CACHE_MB; 0 desliga; ausente = automatico)
     --widescreen      reservado (PS2X_WIDESCREEN=1): planejado, ainda sem efeito
     --vsync           sincronia vertical do d3d11
@@ -39,6 +43,17 @@ OPCOES:
     --peek 0xA,0xB    enderecos do guest no heartbeat
     --timeout S       encerra o jogo apos S segundos
     -h, --help        esta ajuda
+
+RENDERIZADORES (--renderer / renderer =), velocidade relativa medida no menu/abertura:
+    hw          GS por hardware D3D11 em thread propria (~23 vsync/s, o mais rapido). Pequenas
+                diferencas visuais (ex.: brilho de holofote); capturas de tela saem pretas sem
+                PS2X_GS_HW_CPUFRAME=1 (so para regressao, lento). Se nao iniciar, o log do jogo traz
+                '[gs-hw] ... using cpu' (o launcher avisa) -> use cpu-thread.
+    cpu-thread  GS em thread + rasterizacao em faixas (~22 vsync/s); alternativa segura.
+    cpu         CPU serial puro (~7 vsync/s); referencia.
+    avancado:   cpu-bands (faixas sem thread de GS, ~12), d3d11 (backend ROV, ~7), hw-serial
+                (hw na thread do jogo). Sinonimos: cpu-serial = cpu, hw-thread = hw.
+    Perfis: recommended = hw, escala 1, CRT off, cache auto; deck = cpu-thread; original = cpu.
 
 PREFERENCIAS:
     <jogo>/launcher.cfg (chave = valor), gerado comentado na primeira execucao e editado pela
@@ -76,7 +91,7 @@ fn parse(argv: Vec<String>) -> Result<Option<Cli>> {
             "--iso" => cli.iso = Some(next_value(&mut it, &a)?.into()),
             "--force" => cli.force = true,
             "--deep" => cli.deep = true,
-            "--fps" => cli.run.fps = Some(next_value(&mut it, &a)?.parse().map_err(|_| err!("--fps espera um inteiro"))?),
+            "--fps" | "--fps-limit" => cli.run.fps = Some(next_value(&mut it, &a)?.parse().map_err(|_| err!("{a} espera um inteiro"))?),
             "--pad-script" => cli.run.pad_script = Some(next_value(&mut it, &a)?),
             "--fps-log" => cli.run.fps_log = Some(next_value(&mut it, &a)?),
             "--shot-dir" => cli.run.shot_dir = Some(next_value(&mut it, &a)?),
@@ -91,6 +106,9 @@ fn parse(argv: Vec<String>) -> Result<Option<Cli>> {
             }
             "--vfs-cache-mb" => cli.run.vfs_cache_mb = Some(options::parse_cache_mb(&next_value(&mut it, &a)?)?),
             "--widescreen" => cli.run.widescreen = true,
+            "--crt-strength" => cli.run.crt_strength = Some(options::parse_crt_strength(&next_value(&mut it, &a)?)?),
+            "--bands" => cli.run.bands = Some(options::parse_bands(&next_value(&mut it, &a)?)?),
+            "--queue-kb" => cli.run.queue_kb = Some(options::parse_queue_kb(&next_value(&mut it, &a)?)?),
             "--vsync" => cli.run.vsync = Some(true),
             "--peek" => cli.run.peek = Some(next_value(&mut it, &a)?),
             "--timeout" => cli.run.timeout_secs = Some(next_value(&mut it, &a)?.parse().map_err(|_| err!("--timeout espera um numero"))?),
@@ -218,5 +236,17 @@ mod tests {
         assert!(p(&["run", "--internal-scale", "0"]).is_err());
         assert!(p(&["run", "--internal-scale", "9"]).is_err());
         assert!(p(&["run", "--vfs-cache-mb", "x"]).is_err());
+        assert!(p(&["run", "--bands", "99"]).is_err());
+        assert!(p(&["run", "--queue-kb", "1"]).is_err());
+        assert!(p(&["run", "--crt-strength", "101"]).is_err());
+    }
+
+    #[test]
+    fn parses_advanced_and_aliases() {
+        let c = p(&["run", "--renderer", "hw-thread", "--bands", "auto", "--queue-kb", "8192", "--crt-strength", "60", "--fps-limit", "0"]).unwrap().unwrap();
+        assert_eq!(c.run.renderer.as_deref(), Some("hw"));
+        assert_eq!(c.run.bands, Some(options::Bands::Auto));
+        assert_eq!((c.run.queue_kb, c.run.crt_strength, c.run.fps), (Some(8192), Some(60), Some(0)));
+        assert_eq!(p(&["run", "--renderer", "cpu-serial"]).unwrap().unwrap().run.renderer.as_deref(), Some("cpu"));
     }
 }

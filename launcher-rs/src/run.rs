@@ -1,6 +1,6 @@
 //! Inicia o port: monta o ambiente (`PS2X_*`), redireciona a saida para `logs/run_*.log` e espera.
 use crate::{config::GameConfig, err, error::Result, info, log, warn};
-use crate::options::Crt;
+use crate::options::{self, Bands, Crt};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -17,12 +17,18 @@ pub struct RunOptions {
     pub heartbeat: bool,
     pub peek: Option<String>,
     pub timeout_secs: Option<f64>,
-    /// Backend de desenho (`PS2X_GS`): `cpu`, `cpu-thread`, `d3d11` ou `hw`.
+    /// Backend de desenho (`PS2X_GS`): `cpu`, `cpu-thread`, `hw` (avancado: `cpu-bands`, `d3d11`, `hw-serial`).
     pub renderer: Option<String>,
     /// Resolucao interna do renderer por hardware (`PS2X_GS_SCALE`, 1..8).
     pub internal_scale: Option<u32>,
     /// Filtro CRT (`PS2X_POSTFX_CRT` / `PS2X_POSTFX_CRT_STRENGTH`).
     pub crt: Option<Crt>,
+    /// Forca do CRT em percentual (`PS2X_POSTFX_CRT_STRENGTH`, so com CRT ligado).
+    pub crt_strength: Option<u32>,
+    /// Faixas de rasterizacao (`PS2X_GS_BANDS`; so cpu-thread/cpu-bands).
+    pub bands: Option<Bands>,
+    /// Fila do GS em KiB (`PS2X_GS_QUEUE_KB`).
+    pub queue_kb: Option<u32>,
     /// Cache do VFS em MiB (`PS2X_VFS_CACHE_MB`); 0 desliga; `None` = automatico.
     pub vfs_cache_mb: Option<u32>,
     /// Reservado (`PS2X_WIDESCREEN=1`): o runtime ainda nao tem efeito.
@@ -85,16 +91,38 @@ pub fn build_env_with(cfg: &GameConfig, o: &RunOptions, process_env: &dyn Fn(&st
     if let Some(v) = &o.renderer {
         put("PS2X_GS", v.clone());
     }
+    // Renderizador efetivo: o da CLI/cfg ou, na falta, o do ambiente (o runtime assume cpu).
+    let env_gs = process_env("PS2X_GS");
+    let from_cli = o.renderer.is_some() && !o.from_cfg.contains("PS2X_GS");
+    let effective = if from_cli { o.renderer.clone() } else { env_gs.or_else(|| o.renderer.clone()) };
+    let effective = effective.unwrap_or_else(|| "cpu".into()).to_ascii_lowercase();
     if let Some(n) = o.internal_scale {
-        put("PS2X_GS_SCALE", n.to_string());
+        if options::is_hw(&effective) {
+            put("PS2X_GS_SCALE", n.to_string());
+        } else if n > 1 {
+            warn!("escala interna {n} ignorada: so vale com hw (renderizador atual: {effective})");
+        }
+    }
+    if let Some(b) = o.bands {
+        if options::uses_bands(&effective) {
+            put("PS2X_GS_BANDS", b.env());
+        } else {
+            warn!("faixas ({}) ignoradas: so valem com cpu-thread/cpu-bands (renderizador atual: {effective})", b.key());
+        }
+    }
+    if let Some(n) = o.queue_kb {
+        put("PS2X_GS_QUEUE_KB", n.to_string());
     }
     if o.vsync == Some(true) {
         put("PS2X_GS_VSYNC", "1".into());
     }
     if let Some(c) = o.crt {
-        put("PS2X_POSTFX_CRT", if c == Crt::Off { "0" } else { "1" }.into());
-        if let Some(st) = c.strength() {
-            put("PS2X_POSTFX_CRT_STRENGTH", st.into());
+        // O runtime entende os niveis pelo nome (suave|medio|forte); a forca so quando pedida.
+        put("PS2X_POSTFX_CRT", if c == Crt::Off { "0".into() } else { c.key().to_string() });
+        if c != Crt::Off {
+            if let Some(p) = o.crt_strength {
+                put("PS2X_POSTFX_CRT_STRENGTH", options::crt_strength_env(p));
+            }
         }
     }
     if let Some(n) = o.vfs_cache_mb {
@@ -104,6 +132,20 @@ pub fn build_env_with(cfg: &GameConfig, o: &RunOptions, process_env: &dyn Fn(&st
         put("PS2X_WIDESCREEN", "1".into()); // planejado: ainda sem efeito no runtime
     }
     env
+}
+
+/// Linha do log do runtime que indica que o renderer hw nao iniciou e caiu para a CPU
+/// (`[gs-hw] ... using cpu`).
+pub fn hw_fallback_line(log: &str) -> Option<&str> {
+    log.lines().find(|l| l.contains("[gs-hw]") && l.contains("using cpu"))
+}
+
+/// Avisa (log do launcher) se o log do port mostra que o hw caiu para a CPU.
+pub fn warn_if_hw_fell_back(run_log: &std::path::Path) {
+    let text = std::fs::read_to_string(run_log).unwrap_or_default();
+    if let Some(l) = hw_fallback_line(&text) {
+        warn!("o renderer hw nao iniciou e o jogo usa a CPU: {} -- use --renderer cpu-thread", l.trim());
+    }
 }
 
 /// Substitui `{elf}` e `{work}` nos argumentos do `game.toml`.
@@ -181,30 +223,56 @@ pub fn check_started(started: &mut Started, grace: Duration) -> Result<Option<i3
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+    warn_if_hw_fell_back(&started.run_log);
     info!("port em execucao (pid {}); saida em {}", started.child.id(), started.run_log.display());
     Ok(None)
 }
 
+/// Janela em que uma saida com erro conta como "o hw nao iniciou" (fallback para cpu-thread).
+const EARLY_EXIT: Duration = Duration::from_secs(20);
+
+/// Roda o port e espera. Se o renderer hw (escolhido por cfg/perfil ou CLI) fechar com erro logo
+/// ao abrir, tenta uma vez de novo com `cpu-thread` e avisa no log.
 pub fn run(cfg: &GameConfig, o: &RunOptions) -> Result<i32> {
+    let (code, elapsed) = run_once(cfg, o)?;
+    let was_hw = o.renderer.as_deref().is_some_and(options::is_hw);
+    if code != 0 && code != 124 && was_hw && elapsed < EARLY_EXIT {
+        warn!("o renderer hw fechou com erro (codigo {code}) em {:.1}s; tentando de novo com cpu-thread", elapsed.as_secs_f64());
+        let mut fb = o.clone();
+        fb.renderer = Some("cpu-thread".into());
+        fb.internal_scale = None;
+        return run_once(cfg, &fb).map(|r| r.0);
+    }
+    Ok(code)
+}
+
+fn run_once(cfg: &GameConfig, o: &RunOptions) -> Result<(i32, Duration)> {
     let Started { mut child, run_log } = spawn(cfg, o)?;
     let start = Instant::now();
+    let mut scanned = false;
     let status = loop {
         if let Some(s) = child.try_wait()? {
             break s;
+        }
+        if !scanned && start.elapsed() > Duration::from_secs(8) {
+            scanned = true;
+            warn_if_hw_fell_back(&run_log);
         }
         if let Some(t) = o.timeout_secs {
             if start.elapsed() > Duration::from_secs_f64(t) {
                 let _ = child.kill();
                 let _ = child.wait();
+                warn_if_hw_fell_back(&run_log);
                 warn!("tempo limite de {t}s atingido; processo encerrado. Saida em {}", run_log.display());
-                return Ok(124);
+                return Ok((124, start.elapsed()));
             }
         }
         std::thread::sleep(Duration::from_millis(100));
     };
     let code = status.code().unwrap_or(-1);
+    warn_if_hw_fell_back(&run_log);
     info!("encerrado com codigo {code}; saida em {}", run_log.display());
-    Ok(code)
+    Ok((code, start.elapsed()))
 }
 
 #[cfg(test)]
@@ -277,6 +345,7 @@ mod tests {
     #[test]
     fn new_options_export() {
         let o = RunOptions {
+            renderer: Some("hw".into()),
             internal_scale: Some(4),
             crt: Some(Crt::Forte),
             vfs_cache_mb: Some(0),
@@ -285,14 +354,51 @@ mod tests {
         };
         let env = build_env_with(&cfg(), &o, &no_env);
         assert_eq!(env["PS2X_GS_SCALE"], "4");
-        assert_eq!(env["PS2X_POSTFX_CRT"], "1");
-        assert_eq!(env["PS2X_POSTFX_CRT_STRENGTH"], "1.0");
+        assert_eq!(env["PS2X_POSTFX_CRT"], "forte");
+        assert!(!env.contains_key("PS2X_POSTFX_CRT_STRENGTH")); // so quando pedida
         assert_eq!(env["PS2X_VFS_CACHE_MB"], "0");
         assert_eq!(env["PS2X_WIDESCREEN"], "1");
         let env = build_env_with(&cfg(), &RunOptions { crt: Some(Crt::Off), ..Default::default() }, &no_env);
         assert_eq!(env["PS2X_POSTFX_CRT"], "0");
         assert!(!env.contains_key("PS2X_POSTFX_CRT_STRENGTH"));
         assert!(!env.contains_key("PS2X_VFS_CACHE_MB")); // ausente = automatico
+    }
+
+    #[test]
+    fn scale_bands_depend_on_renderer() {
+        let mk = |r: &str| RunOptions {
+            renderer: Some(r.into()),
+            internal_scale: Some(2),
+            bands: Some(Bands::Auto),
+            queue_kb: Some(8192),
+            crt: Some(Crt::Medio),
+            crt_strength: Some(50),
+            ..Default::default()
+        };
+        let hw = build_env_with(&cfg(), &mk("hw"), &no_env);
+        assert_eq!(hw["PS2X_GS_SCALE"], "2");
+        assert!(!hw.contains_key("PS2X_GS_BANDS"), "nunca bands com hw");
+        assert_eq!((hw["PS2X_GS_QUEUE_KB"].as_str(), hw["PS2X_POSTFX_CRT"].as_str(), hw["PS2X_POSTFX_CRT_STRENGTH"].as_str()), ("8192", "medio", "0.50"));
+        let ct = build_env_with(&cfg(), &mk("cpu-thread"), &no_env);
+        assert_eq!(ct["PS2X_GS_BANDS"], "auto");
+        assert!(!ct.contains_key("PS2X_GS_SCALE"));
+        // Renderizador vindo so do ambiente tambem conta.
+        let o = RunOptions { internal_scale: Some(3), bands: Some(Bands::N(4)), ..Default::default() };
+        let e = build_env_with(&cfg(), &o, &|k| (k == "PS2X_GS").then(|| "hw-serial".to_string()));
+        assert_eq!(e["PS2X_GS_SCALE"], "3");
+        assert!(!e.contains_key("PS2X_GS_BANDS"));
+        // CRT desligado nao exporta forca.
+        let o = RunOptions { crt: Some(Crt::Off), crt_strength: Some(10), ..Default::default() };
+        assert!(!build_env_with(&cfg(), &o, &no_env).contains_key("PS2X_POSTFX_CRT_STRENGTH"));
+    }
+
+    #[test]
+    fn detects_hw_fallback_line() {
+        assert!(hw_fallback_line("a
+[gs-hw] init failed, using cpu
+b").is_some());
+        assert!(hw_fallback_line("[gs-hw] ok using gpu").is_none());
+        assert!(hw_fallback_line("using cpu").is_none());
     }
 
     #[test]
