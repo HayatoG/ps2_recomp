@@ -282,11 +282,13 @@ def read_series(serie: dict, base: Path, x_mode: str) -> list[tuple[float, float
         log(base, "WARN", f"csv ausente: {path}")
         return []
     points, cumulative, previous = [], 0.0, 0.0
-    with path.open(encoding="utf-8", newline="") as handle:
+    with path.open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
             try:
                 x, y = float(row[serie.get("x", "t_s")]), float(row[serie["y"]])
             except (KeyError, ValueError):
+                continue
+            if y < 0:  # amostra invalida (ex.: tempo de CPU do processo que encerra); nenhuma serie aqui e negativa
                 continue
             if x_mode == "vsync":
                 cumulative += float(row["guest_vsync_hz"]) * (x - previous)

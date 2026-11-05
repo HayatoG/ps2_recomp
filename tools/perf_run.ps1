@@ -140,6 +140,7 @@ while (-not $proc.HasExited) {
         $now = $watch.Elapsed.TotalSeconds; $dt = $now - $lastT
         $cpu = $proc.TotalProcessorTime
         $used = ($cpu - $lastCpu).TotalSeconds / $dt
+        if ($used -lt 0 -or $proc.HasExited) { break }   # processo encerrando: o tempo de CPU "volta" e gera amostra negativa
         $threads = @{}
         foreach ($th in $proc.Threads) { try { $threads[$th.Id] = $th.TotalProcessorTime } catch { } }
         $deltas = foreach ($id in $threads.Keys) {
