@@ -78,3 +78,13 @@ Observação: o recurso comum é **splat + ee-gcc 2.9x + objdiff + decomp.me**. 
 |---|---|---|---|
 | rea-launcher-sdk (AkitaOnRails) | https://github.com/akitaonrails/rea-launcher-sdk | MIT OR Apache-2.0 | Identificação por hash com recusa amigável, runtime privado com manifesto, ledger, download retomável verificado, `launcher.cfg`, `--check`, logs com limite; ver `launcher-plan.md` |
 | rea-colin-mcrae, rea-screamer-trilogy | https://github.com/akitaonrails/rea-colin-mcrae | ver repo | Exemplos de launcher por jogo; **não** copiar o pacote HD derivado de arte (regra 2) |
+
+## Referências para VU1 nativo e GS por hardware (adicionado)
+
+Contexto: o perfil da cena 3D do jogo mostrou GS em software (~52%) e interpretador VU1 (~32%) como os gargalos; a rota rápida é VU1 nativo e GS por hardware (ver `ghost_pc/docs/gs-gpu-stage2.md`). Estas são referências de **design e comportamento**; nenhum código foi copiado ou usado.
+
+| Projeto | URL | Licença | O que usar como referência | Riscos |
+|---|---|---|---|---|
+| PCSX2 (microVU) | https://github.com/PCSX2/pcsx2 | GPL-3.0 | Recompilação dinâmica do VU1 para código nativo (microVU): traduzir o microprograma uma vez, tratar flags/pipeline e saltos; base para o VU1 nativo | GPL: ler o design, não copiar código; o port tem arquitetura própria |
+| PCSX2 (GSdx / GSHw, renderer por hardware) | https://github.com/PCSX2/pcsx2 | GPL-3.0 | Renderer por GPU: render targets, blend/Z do hardware, resolução interna escalável, fallbacks; separação EE/VU/GS em threads | Aceita pequenas diferenças de pixel por velocidade; validar com replay e PSNR contra a nossa referência |
+| paraLLEl-GS (Themaister) | https://github.com/Themaister/parallel-gs | verificar no repo | Referência **conceitual** da ideia de emular a VRAM do GS na GPU (VRAM inteira num buffer, rasterização em compute); inspirou o backend "VRAM na GPU com ROV" | Foco em Vulkan/compute; conferir a licença antes de qualquer reuso (nenhum código usado) |

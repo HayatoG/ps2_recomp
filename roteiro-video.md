@@ -289,6 +289,11 @@ Medir só o primeiro engana: você pode apresentar 200 imagens por segundo e o j
 | O vermelho era uma soma | `PMULTH` somava oito produtos em vez de mantê-los separados; o filtro de cor perdia verde e azul | Céu e prédio no azul da referência |
 | A cor que virava zero | `MAX` do VU comparava como float e zerava cores guardadas como inteiro; o hardware compara bits | Cenário inteiro na tela |
 | Um ponto só | VIF0 aceitava só UNPACK de 32 bits; vértices da personagem nunca chegavam ao VU0 | A Motoko aparece na cena |
+| Gameplay renderiza (04/11/2026) | Caixa de diálogo funciona ("Aramaki here", X avança); cena 3D a ~3 vsync/s | O jogo roda, mas 17x abaixo do alvo de 50 Hz |
+| Perfil da cena 3D | Rasterizador GS em software ~52%, interpretador VU1 ~32%, IOP ~5%, guest recompilado ~2,5% | O código da CPU do jogo não é o problema; os dois chips emulados literalmente são |
+| 5 agentes em paralelo | VU1 3,0-3,3x (saída idêntica bit a bit); rasterizador CPU 2,04x (818.934 comandos GS idênticos); fila cpu-thread de ~400 mil esperas/10 s para ~280; GPU com VRAM inteira e ROV, PSNR 51-55 dB, ~10% mais rápido | Ganhos reais e verificados, mas pequenos frente à lacuna |
+| Medição final, máquina parada (05/11) | Mesma janela (vsync 7530-7640): baseline 2,96 Hz; build novo CPU 5,39 Hz; d3d11 6,87 Hz; alvo 50 Hz | Dobrou, mas fica a 7x+ do alvo: ajuste fino não fecha a conta |
+| Decisão de rota | Abandonar "byte-idêntico" no caminho rápido: VU1 nativo (estilo microVU), GS por hardware em D3D11, threads EE/VU1/GS, e antes reduzir o custo do rebuild | Troca de referência exata e lenta por implementação rápida e aproximada |
 
 ## Apêndice B — Glossário rápido (cards na tela)
 **ELF** · **R5900/EE** · **MMI** · **IOP / IRX** · **ISO9660** · **crt0** · **syscall** · **stripped** · **RTTI** · **LZSS/Huffman** · **GS (Graphics Synthesizer)** · **VU (Vector Unit)** · **Recompilação estática** · **Spike** · **Matching decomp**
@@ -317,6 +322,12 @@ Medir só o primeiro engana: você pode apresentar 200 imagens por segundo e o j
 - ❌ "`0x364680` não é uma task, a lista está corrompida" → ✅ no PCSX2 era task legítima. Eu afirmei sem referência; bastou ler a memória do jogo real para derrubar a hipótese.
 - ❌ Confiar no watchpoint de hardware porque "armou" → ✅ não disparou nem em escrita que eu sabia existir. Ferramenta de diagnóstico também precisa ser testada; um vigia simples em laço pegou o culpado.
 - ❌ Empolgar com a causa e dizer "resolvido" → ✅ a correção passou de um muro e a tela continuou preta. Dizer o que mudou de verdade para quem está olhando.
+- ❌ Dois ninjas diferentes no mesmo build (um agente usou o do WinGet 1.13.2, os outros o do Visual Studio 1.12.1) → ✅ cada versão descarta o `.ninja_log` da outra e forçou recompilar ~41,8 mil arquivos. Ferramenta de build é parte do ambiente: fixar uma versão e um lock de build para todos.
+- ❌ Culpar o rasterizador ou o VU1 por uma regressão de imagem na cena 3D → ✅ dois agentes provaram (A/B com o rasterizador original no mesmo exe, mais replay) que era uma correção de GIFtags incompletas do frontend, que muda o que é desenhado; ficou atrás de `PS2X_GS_GIF_STATE=1`. Lição: bisseção por troca de arquivos, replay de streams e medir antes de culpar.
+- ❌ Confiar na medição parcial com a máquina carregada por 5 agentes → ✅ os números do ninja vieram inflados de 2,5x a 10x. Medição final só com a máquina parada e na mesma janela do jogo.
+- ❌ Achar que "fiel" implica "rápido" (backend de GPU que emula cada pixel no shader) → ✅ visualmente equivalente (PSNR 51-55 dB), mas só ~10% mais rápido: o gargalo passou para a thread do guest.
+- ❌ Fazer um plano de ganhos de 2-4x quando a lacuna era de ~15-20x → ✅ eu deveria ter dito no início que ajuste fino não fecharia a conta. Dizer a ordem de grandeza antes de planejar.
+- ❌ "Hardware 30-50x melhor e roda a 5 FPS? O emulador roda bem" → ✅ comparação enganosa; ver Rodada 9. Implementação de referência não é implementação rápida.
 
 ## Rodada 7: licença, arquitetura e o plano para GPU, launcher e lojas
 
@@ -376,3 +387,36 @@ Medir só o primeiro engana: você pode apresentar 200 imagens por segundo e o j
 **Corrigi e nada mudou.** Foi instrutivo: rodei e vieram exatamente os mesmos 10.437 vértices pretos. A hipótese estava certa, mas a correção não fazia efeito: antes de cada instrução, o interpretador já normalizava os operandos e zerava os denormais, então o meu `MAX` novo só recebia zeros. Lendo os registradores crus, os vértices sem cor nesse grupo foram a zero e o cenário apareceu inteiro: janelas, contêineres e refletor. [TELA: antes e depois lado a lado com o PCSX2]
 
 **Onde a Motoko estava.** Ela ainda não aparecia. O dump mostrou que todos os 3.269 triângulos do outro grupo eram degenerados, com quase todos os vértices no mesmo ponto. Quando tudo cai em um ponto, a transformação pode até estar certa, mas as entradas estão iguais. O código de esqueleto envia os vértices ao VU0 por DMA em formatos compactos, como V3-16 e V4-8, e o nosso VIF0 só aceitava 32 bits. O resto era ignorado em silêncio. Escolhi fazer o VIF0 usar o mesmo código do VIF1, em vez de escrever uma segunda versão: é uma regra só, e um bug corrigido vale para os dois. O risco é quebrar o VIF1, que já funcionava, então a mesma execução testa os dois. Resultado: a Motoko apareceu, de costas no terraço, com o cenário atrás, muito parecida com a referência do PCSX2. Dos 5.101 triângulos desse grupo no dump, 5.036 já têm três pontos distintos. [TELA: captura do port ao lado da referência] Ainda faltam texto e retrato na caixa de diálogo, a velocidade (cerca de 0,3 vsync/s) e o som: `[PREENCHER]`.
+
+## Rodada 9: o jogo roda, a 3 quadros por segundo, e por que isso mudou o rumo
+
+**Onde estamos.** Em 04/11/2026 o jogo abre e a gameplay renderiza. A caixa de diálogo funciona: aparece "Aramaki here" e o X avança. [TELA: a caixa de diálogo, o jogador apertando X] Mas na cena 3D são cerca de 3 vsync por segundo. O alvo é 50. Não dá para jogar. Para o vídeo, é a hora de parar de consertar bugs de correção e perguntar: onde o tempo vai?
+
+**Primeiro medir, depois opinar.** Perfilei a cena 3D no host, onde uma única thread faz tudo. O resultado: rasterizador de GS em software ~52%, interpretador do VU1 ~32%, IOP ~5% e o código do jogo recompilado só ~2,5%. [TELA: o gráfico de pizza do perfil] O conceito: o código da CPU do jogo, que era o que eu mais temia, não é o problema. Os dois problemas são os dois chips que emulamos de forma literal. Um VU1 interpretado gasta dezenas de ciclos do host para cada ciclo do original, e o GS, em software, tem que pintar pixel por pixel o que o hardware dedicado pintava de graça.
+
+**Cinco agentes em paralelo, cada um com seus arquivos.** Rodei cinco agentes (opus e sonnet) ao mesmo tempo, com arquivos por dono e um lock de build, para que ninguém pisasse no trabalho do outro. Por que lock? Porque o build é o recurso mais caro e compartilhado; sem ele, dois agentes recompilam e se atrapalham. O que saiu, tudo verificado:
+- **VU1**: 3,0 a 3,3x mais rápido. O teste foi um harness de replay com 15 mil chamadas reais mais 50 mil sintéticas, e a saída é idêntica bit a bit. Por que replay? Porque posso gravar a entrada uma vez e comparar a saída exata a cada otimização, sem rodar o jogo.
+- **Rasterizador de CPU**: 2,04x, com replay de 818.934 comandos GS e resultado idêntico.
+- **Fila do modo cpu-thread**: o produtor acordava a cada comando, ~400 mil esperas em 10 s. Passou para ~280, com a fila de 1 MiB para 32 MiB. O conceito é o custo de acordar uma thread: é caro, então se acorda em lote.
+- **Backend de GPU "VRAM inteira na GPU com ROV"**: visualmente equivalente (PSNR de 51 a 55 dB na gameplay), mas só ~10% mais rápido. O gargalo mudou para a thread do guest. Fiel não é rápido.
+
+**Três tropeços que valem o vídeo.**
+1. *O ninja errado.* Um agente usou o ninja do WinGet (1.13.2) enquanto os outros usavam o do Visual Studio (1.12.1). Cada versão descarta o `.ninja_log` da outra, e isso forçou recompilar ~41,8 mil arquivos. Ninguém errou no código; o erro foi no ambiente. [TELA: o log do ninja pedindo tudo de novo]
+2. *A regressão que não era de quem eu suspeitava.* Apareceu uma regressão de imagem na cena 3D. Dois agentes provaram, com A/B usando o rasterizador original no mesmo exe e replay, que não era o rasterizador nem o VU1: era uma correção de GIFtags incompletas do frontend, que muda o que é desenhado. Ficou atrás de `PS2X_GS_GIF_STATE=1`. A lição: bisseção por troca de arquivos e replay de streams, e medir antes de culpar.
+3. *A medição que enganou.* Com a máquina carregada por cinco agentes, os números do ninja vieram inflados de 2,5x a 10x. Por isso a medição final foi feita com a máquina parada.
+
+**O número que importa.** Mesma janela do jogo (vsync 7530 a 7640), máquina parada: baseline **2,96 Hz**; build novo no modo CPU **5,39 Hz**; d3d11 **6,87 Hz**; alvo **50 Hz**. Ou seja, dobrou, mas fica a 7x ou mais do alvo. [TELA: a tabela de quatro linhas]
+
+**O erro de planejamento que eu assumo.** Eu tinha feito um plano de ganhos de 2 a 4x. A lacuna real era de ~15 a 20x. Eu deveria ter dito, no começo, que ajuste fino não fecharia a conta. Ordem de grandeza primeiro, plano depois.
+
+**A pergunta do usuário, e a resposta honesta.** O usuário questionou: "hardware 30-50x melhor e roda a 5 FPS? O emulador roda bem." É uma ótima pergunta, e a comparação é enganosa por quatro razões. (1) A CPU só é ~15x mais rápida em UMA thread. (2) Emular cada ciclo do VU1 custa dezenas de ciclos do host. (3) O GS do PS2 preenche cerca de 7 milhões de pixels por quadro em hardware dedicado, e nós fazemos isso em software. (4) O PCSX2 roda bem porque compila o VU1 para código nativo (o microVU), desenha o GS na GPU com render targets e o blend do hardware, aceitando pequenas diferenças, e separa EE, VU e GS em threads. O que eu tinha construído era a implementação de referência: exata e verificável, não rápida. Isso não foi trabalho perdido: ela é o oráculo contra o qual vou comparar a versão rápida. [TELA: o diagrama das três threads do PCSX2]
+
+**A decisão de rota (do usuário).** Abandonar o "byte-idêntico" para o caminho rápido. Alternativa descartada: continuar espremendo a referência (rende 2x aqui e ali e não fecha 15x). Risco aceito: a versão rápida pode diferir em pixels e pequenos detalhes da referência, e precisaremos medir essa diferença com replay e PSNR, em vez de assumir. O plano:
+- (a) **VU1 para código nativo no estilo microVU**: traduzir o microprograma uma vez para código do host, em vez de interpretar instrução a instrução.
+- (b) **GS por hardware de verdade em D3D11**: render targets, blend e Z do hardware, resolução interna escalável, com a interface já preparada para D3D12 e Vulkan depois.
+- (c) **Threads separadas para EE, VU1 e GS.**
+- (d) **Antes de tudo, reduzir o custo do rebuild.** O PCH do runner inclui `ps2_runtime.h`, com 22 headers e 46,7 mil linhas; editar qualquer um refaz tudo. O plano: um prelúdio leve com 11 headers, um `build_dev` em `/Od` e um script único de build. Por que primeiro? Porque cada experimento das etapas (a) a (c) paga esse custo; baratear o rebuild multiplica tudo que vem depois (e evita repetir o episódio do ninja).
+
+**Ideias futuras (só ideias, nada feito).** O usuário levantou: resolução alta/4K e widescreen. A resolução interna escalável do renderer por hardware viabiliza a primeira; o widescreen exige patch da projeção do jogo. Também texturas refeitas (substituição por hash no upload; na RAM do host, não na RAM do guest) e modelos novos. Nenhuma foi implementada. Resultado dessas etapas: `[PREENCHER]`.
+
+**Referências (regra 8).** Para esse caminho, leio o PCSX2 (GPL-3: microVU e GSdx/GSHw) e o paraLLEl-GS só como referência de design, sem copiar código. Ver `docs/similar-projects.md`.
