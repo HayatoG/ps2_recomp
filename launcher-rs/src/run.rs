@@ -1,6 +1,7 @@
 //! Inicia o port: monta o ambiente (`PS2X_*`), redireciona a saida para `logs/run_*.log` e espera.
 use crate::{config::GameConfig, err, error::Result, info, log, warn};
-use std::collections::BTreeMap;
+use crate::options::Crt;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -16,8 +17,19 @@ pub struct RunOptions {
     pub heartbeat: bool,
     pub peek: Option<String>,
     pub timeout_secs: Option<f64>,
-    /// Backend de desenho (`PS2X_GS`): `cpu` ou `d3d11`.
+    /// Backend de desenho (`PS2X_GS`): `cpu`, `cpu-thread`, `d3d11` ou `hw`.
     pub renderer: Option<String>,
+    /// Resolucao interna do renderer por hardware (`PS2X_GS_SCALE`, 1..8).
+    pub internal_scale: Option<u32>,
+    /// Filtro CRT (`PS2X_POSTFX_CRT` / `PS2X_POSTFX_CRT_STRENGTH`).
+    pub crt: Option<Crt>,
+    /// Cache do VFS em MiB (`PS2X_VFS_CACHE_MB`); 0 desliga; `None` = automatico.
+    pub vfs_cache_mb: Option<u32>,
+    /// Reservado (`PS2X_WIDESCREEN=1`): o runtime ainda nao tem efeito.
+    pub widescreen: bool,
+    /// Variaveis `PS2X_*` cujo valor veio do `launcher.cfg` (e nao da linha de comando): o
+    /// ambiente do processo vence essas (precedencia: CLI > ambiente > cfg > game.toml).
+    pub from_cfg: BTreeSet<&'static str>,
     /// Sincronia vertical do D3D11 (`PS2X_GS_VSYNC`).
     pub vsync: Option<bool>,
     /// Sem janela de console para o port (a GUI nao tem console; a saida ja vai para o log).
@@ -25,37 +37,71 @@ pub struct RunOptions {
     pub extra_args: Vec<String>,
 }
 
+/// Monta o ambiente do port. Precedencia: linha de comando > ambiente do processo >
+/// `launcher.cfg` > `game.toml`. Variaveis ja presentes no ambiente nao sao sobrescritas pelo
+/// cfg nem pelo `game.toml`; so a linha de comando as sobrescreve.
 pub fn build_env(cfg: &GameConfig, o: &RunOptions) -> BTreeMap<String, String> {
+    build_env_with(cfg, o, &|k| std::env::var(k).ok())
+}
+
+pub fn build_env_with(cfg: &GameConfig, o: &RunOptions, process_env: &dyn Fn(&str) -> Option<String>) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
-    env.insert("PS2X_VIDEO_HZ".into(), cfg.video_hz().into());
-    env.extend(cfg.run_env.clone());
+    // game.toml (menor precedencia): o ambiente do usuario vence.
+    for (k, v) in std::iter::once(("PS2X_VIDEO_HZ".to_string(), cfg.video_hz().to_string())).chain(cfg.run_env.clone()) {
+        if process_env(&k).is_none() {
+            env.insert(k, v);
+        }
+    }
     let abs = |p: &str| std::path::absolute(p).map(|x| x.display().to_string()).unwrap_or_else(|_| p.to_string());
+    // Valor vindo da CLI sempre entra; valor vindo do cfg so se o ambiente nao trouxer a variavel.
+    let mut put = |k: &'static str, v: String| {
+        if o.from_cfg.contains(k) && process_env(k).is_some() {
+            info!("{k} ja definido no ambiente: vence o launcher.cfg");
+        } else {
+            env.insert(k.to_string(), v);
+        }
+    };
     if let Some(v) = o.fps {
-        env.insert("PS2X_TARGET_FPS".into(), v.to_string()); // 0 = ilimitado
+        put("PS2X_TARGET_FPS", v.to_string()); // 0 = ilimitado
     }
     if let Some(v) = &o.pad_script {
-        env.insert("PS2X_PAD_SCRIPT".into(), abs(v));
+        put("PS2X_PAD_SCRIPT", abs(v));
     }
     if let Some(v) = &o.fps_log {
-        env.insert("PS2X_FPS_LOG".into(), abs(v));
+        put("PS2X_FPS_LOG", abs(v));
     }
     if let Some(v) = &o.shot_dir {
-        env.insert("PS2X_SHOT_DIR".into(), abs(v));
+        put("PS2X_SHOT_DIR", abs(v));
     }
     if let Some(v) = &o.missing_log {
-        env.insert("PS2X_MISSING_LOG".into(), abs(v));
+        put("PS2X_MISSING_LOG", abs(v));
     }
     if o.heartbeat || o.peek.is_some() {
-        env.insert("PS2X_HEARTBEAT".into(), "1".into());
+        put("PS2X_HEARTBEAT", "1".into());
     }
     if let Some(v) = &o.peek {
-        env.insert("PS2X_PEEK".into(), v.clone());
+        put("PS2X_PEEK", v.clone());
     }
     if let Some(v) = &o.renderer {
-        env.insert("PS2X_GS".into(), v.clone());
+        put("PS2X_GS", v.clone());
+    }
+    if let Some(n) = o.internal_scale {
+        put("PS2X_GS_SCALE", n.to_string());
     }
     if o.vsync == Some(true) {
-        env.insert("PS2X_GS_VSYNC".into(), "1".into());
+        put("PS2X_GS_VSYNC", "1".into());
+    }
+    if let Some(c) = o.crt {
+        put("PS2X_POSTFX_CRT", if c == Crt::Off { "0" } else { "1" }.into());
+        if let Some(st) = c.strength() {
+            put("PS2X_POSTFX_CRT_STRENGTH", st.into());
+        }
+    }
+    if let Some(n) = o.vfs_cache_mb {
+        put("PS2X_VFS_CACHE_MB", n.to_string());
+    }
+    if o.widescreen {
+        put("PS2X_WIDESCREEN", "1".into()); // planejado: ainda sem efeito no runtime
     }
     env
 }
@@ -186,15 +232,67 @@ mod tests {
     #[test]
     fn env_defaults_and_overrides() {
         let o = RunOptions { fps: Some(30), heartbeat: true, ..Default::default() };
-        let env = build_env(&cfg(), &o);
+        let env = build_env_with(&cfg(), &o, &|_| None);
         assert_eq!(env["PS2X_VIDEO_HZ"], "50");
         assert_eq!(env["PS2X_TARGET_FPS"], "30"); // a linha de comando vence o game.toml
         assert_eq!(env["PS2X_HEARTBEAT"], "1");
         assert!(!env.contains_key("PS2X_GS"));
         let o = RunOptions { renderer: Some("d3d11".into()), vsync: Some(true), ..Default::default() };
-        let env = build_env(&cfg(), &o);
+        let env = build_env_with(&cfg(), &o, &|_| None);
         assert_eq!(env["PS2X_GS"], "d3d11");
         assert_eq!(env["PS2X_GS_VSYNC"], "1");
+    }
+
+    fn no_env(_: &str) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn cli_beats_env_beats_cfg_beats_game_toml() {
+        let user = |k: &str| match k {
+            "PS2X_GS" => Some("hw".to_string()),
+            "PS2X_TARGET_FPS" => Some("25".to_string()),
+            _ => None,
+        };
+        // Valores do cfg: o ambiente vence; game.toml (PS2X_TARGET_FPS=60) tambem perde para o ambiente.
+        let o = RunOptions {
+            renderer: Some("cpu".into()),
+            internal_scale: Some(3),
+            from_cfg: BTreeSet::from(["PS2X_GS", "PS2X_GS_SCALE"]),
+            ..Default::default()
+        };
+        let env = build_env_with(&cfg(), &o, &user);
+        assert!(!env.contains_key("PS2X_GS"), "ambiente deve vencer o cfg");
+        assert!(!env.contains_key("PS2X_TARGET_FPS"), "ambiente deve vencer o game.toml");
+        assert_eq!(env["PS2X_GS_SCALE"], "3"); // sem ambiente: o cfg vale
+        // Linha de comando vence o ambiente.
+        let o = RunOptions { renderer: Some("d3d11".into()), fps: Some(30), ..Default::default() };
+        let env = build_env_with(&cfg(), &o, &user);
+        assert_eq!((env["PS2X_GS"].as_str(), env["PS2X_TARGET_FPS"].as_str()), ("d3d11", "30"));
+        // Sem ambiente, o cfg vence o game.toml.
+        let o = RunOptions { fps: Some(45), from_cfg: BTreeSet::from(["PS2X_TARGET_FPS"]), ..Default::default() };
+        assert_eq!(build_env_with(&cfg(), &o, &no_env)["PS2X_TARGET_FPS"], "45");
+    }
+
+    #[test]
+    fn new_options_export() {
+        let o = RunOptions {
+            internal_scale: Some(4),
+            crt: Some(Crt::Forte),
+            vfs_cache_mb: Some(0),
+            widescreen: true,
+            ..Default::default()
+        };
+        let env = build_env_with(&cfg(), &o, &no_env);
+        assert_eq!(env["PS2X_GS_SCALE"], "4");
+        assert_eq!(env["PS2X_POSTFX_CRT"], "1");
+        assert_eq!(env["PS2X_POSTFX_CRT_STRENGTH"], "1.0");
+        assert_eq!(env["PS2X_VFS_CACHE_MB"], "0");
+        assert_eq!(env["PS2X_WIDESCREEN"], "1");
+        let env = build_env_with(&cfg(), &RunOptions { crt: Some(Crt::Off), ..Default::default() }, &no_env);
+        assert_eq!(env["PS2X_POSTFX_CRT"], "0");
+        assert!(!env.contains_key("PS2X_POSTFX_CRT_STRENGTH"));
+        assert!(!env.contains_key("PS2X_VFS_CACHE_MB")); // ausente = automatico
     }
 
     #[test]

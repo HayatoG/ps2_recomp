@@ -5,7 +5,9 @@ pub mod dump;
 pub mod error;
 pub mod fsx;
 pub mod iso;
+pub mod hw;
 pub mod log;
+pub mod options;
 pub mod run;
 pub mod settings;
 #[cfg(feature = "gui")]

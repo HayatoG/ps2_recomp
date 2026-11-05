@@ -2,8 +2,10 @@
 //!
 //! - Gerado na primeira execucao com todas as chaves comentadas e explicadas ([`template`]).
 //! - Chave ausente = "nao definida": vale o padrao do `game.toml`/runtime.
-//! - Precedencia: flag de linha de comando > `launcher.cfg` > padrao ([`Settings::apply`]).
+//! - Precedencia: linha de comando > ambiente (`PS2X_*`) > `launcher.cfg` > `game.toml`
+//!   ([`Settings::apply`] marca o que veio do cfg; `run::build_env` deixa o ambiente vencer).
 //! - Chave desconhecida ou valor invalido vira aviso (nunca derruba o launcher).
+use crate::options::{self, Crt};
 use crate::{error::Result, run::RunOptions};
 use std::path::{Path, PathBuf};
 
@@ -40,22 +42,30 @@ impl Profile {
 pub enum Renderer {
     /// Rasterizacao por software (padrao do runtime).
     Cpu,
-    /// Desenha na CPU e apresenta via Direct3D 11 (experimental).
+    /// Rasteriza na CPU em thread separada.
+    CpuThread,
+    /// Backend Direct3D 11 atual (ROV).
     D3d11,
+    /// Renderer por hardware (em desenvolvimento).
+    Hw,
 }
 
 impl Renderer {
     pub fn key(self) -> &'static str {
         match self {
             Renderer::Cpu => "cpu",
+            Renderer::CpuThread => "cpu-thread",
             Renderer::D3d11 => "d3d11",
+            Renderer::Hw => "hw",
         }
     }
 
     pub fn parse(v: &str) -> Option<Renderer> {
         match v {
             "cpu" => Some(Renderer::Cpu),
+            "cpu-thread" => Some(Renderer::CpuThread),
             "d3d11" => Some(Renderer::D3d11),
+            "hw" => Some(Renderer::Hw),
             _ => None,
         }
     }
@@ -75,6 +85,10 @@ pub struct Settings {
     pub deck_fps: Option<u32>,
     pub vsync: Option<bool>,
     pub heartbeat: Option<bool>,
+    pub internal_scale: Option<u32>,
+    pub crt: Option<Crt>,
+    pub vfs_cache_mb: Option<u32>,
+    pub widescreen: Option<bool>,
     /// `false` faz o launcher sem argumentos jogar direto (como `--no-window`).
     pub show_window: Option<bool>,
 }
@@ -86,6 +100,10 @@ pub struct Resolved {
     pub fps: Option<u32>,
     pub vsync: Option<bool>,
     pub heartbeat: bool,
+    pub internal_scale: Option<u32>,
+    pub crt: Option<Crt>,
+    pub vfs_cache_mb: Option<u32>,
+    pub widescreen: bool,
 }
 
 fn parse_bool(v: &str) -> Option<bool> {
@@ -131,6 +149,10 @@ impl Settings {
                 "deck_fps" => lower.parse().ok().filter(|f| DECK_FPS_CHOICES.contains(f)).map(|f| s.deck_fps = Some(f)).is_some(),
                 "vsync" => parse_bool(&lower).map(|b| s.vsync = Some(b)).is_some(),
                 "heartbeat" => parse_bool(&lower).map(|b| s.heartbeat = Some(b)).is_some(),
+                "internal_scale" => options::parse_scale(&lower).ok().map(|n| s.internal_scale = Some(n)).is_some(),
+                "crt" => options::parse_crt(&lower).ok().map(|c| s.crt = Some(c)).is_some(),
+                "vfs_cache_mb" => options::parse_cache_mb(&lower).ok().map(|n| s.vfs_cache_mb = Some(n)).is_some(),
+                "widescreen" => parse_bool(&lower).map(|b| s.widescreen = Some(b)).is_some(),
                 "show_window" => parse_bool(&lower).map(|b| s.show_window = Some(b)).is_some(),
                 _ => {
                     warnings.push(format!("linha {}: chave desconhecida '{k}'", n + 1));
@@ -147,44 +169,90 @@ impl Settings {
     /// Aplica o perfil: Original/Recomendado/Deck fixam renderer, fps e vsync; Personalizado (ou
     /// sem perfil) usa as chaves soltas.
     pub fn resolve(&self) -> Resolved {
-        let heartbeat = self.heartbeat.unwrap_or(false);
+        // Opcoes que nao dependem do perfil.
+        let base = Resolved {
+            heartbeat: self.heartbeat.unwrap_or(false),
+            vfs_cache_mb: self.vfs_cache_mb,
+            ..Default::default()
+        };
         match self.profile {
             Some(Profile::Original) | Some(Profile::Recommended) => {
-                Resolved { renderer: Some(Renderer::Cpu), fps: Some(60), vsync: Some(false), heartbeat }
+                Resolved { renderer: Some(Renderer::Cpu), fps: Some(60), vsync: Some(false), ..base }
             }
             Some(Profile::Deck) => Resolved {
                 renderer: Some(Renderer::Cpu),
                 fps: Some(self.deck_fps.unwrap_or(60)),
                 vsync: Some(false),
-                heartbeat,
+                ..base
             },
-            Some(Profile::Custom) | None => {
-                Resolved { renderer: self.renderer, fps: self.fps, vsync: self.vsync, heartbeat }
-            }
+            Some(Profile::Custom) | None => Resolved {
+                renderer: self.renderer,
+                fps: self.fps,
+                vsync: self.vsync,
+                internal_scale: self.internal_scale,
+                crt: self.crt,
+                widescreen: self.widescreen.unwrap_or(false),
+                ..base
+            },
         }
     }
 
-    /// Preenche em `o` so o que a linha de comando nao definiu (flag > cfg > padrao).
+    /// Preenche em `o` so o que a linha de comando nao definiu e marca em `o.from_cfg` as
+    /// variaveis vindas do cfg (o ambiente do processo vence essas; ver `run::build_env`).
     pub fn apply(&self, o: &mut RunOptions) {
         let r = self.resolve();
-        o.fps = o.fps.or(r.fps);
-        o.renderer = o.renderer.clone().or(r.renderer.map(|x| x.key().to_string()));
-        o.vsync = o.vsync.or(r.vsync);
-        o.heartbeat |= r.heartbeat;
+        if o.fps.is_none() && r.fps.is_some() {
+            o.fps = r.fps;
+            o.from_cfg.insert("PS2X_TARGET_FPS");
+        }
+        if o.renderer.is_none() {
+            if let Some(x) = r.renderer {
+                o.renderer = Some(x.key().to_string());
+                o.from_cfg.insert("PS2X_GS");
+            }
+        }
+        if o.vsync.is_none() && r.vsync.is_some() {
+            o.vsync = r.vsync;
+            o.from_cfg.insert("PS2X_GS_VSYNC");
+        }
+        if !o.heartbeat && o.peek.is_none() && r.heartbeat {
+            o.heartbeat = true;
+            o.from_cfg.insert("PS2X_HEARTBEAT");
+        }
+        if o.internal_scale.is_none() && r.internal_scale.is_some() {
+            o.internal_scale = r.internal_scale;
+            o.from_cfg.insert("PS2X_GS_SCALE");
+        }
+        if o.crt.is_none() && r.crt.is_some() {
+            o.crt = r.crt;
+            o.from_cfg.extend(["PS2X_POSTFX_CRT", "PS2X_POSTFX_CRT_STRENGTH"]);
+        }
+        if o.vfs_cache_mb.is_none() && r.vfs_cache_mb.is_some() {
+            o.vfs_cache_mb = r.vfs_cache_mb;
+            o.from_cfg.insert("PS2X_VFS_CACHE_MB");
+        }
+        if !o.widescreen && r.widescreen {
+            o.widescreen = true;
+            o.from_cfg.insert("PS2X_WIDESCREEN");
+        }
     }
 
     /// Texto completo, com as chaves definidas ativas e as demais comentadas.
     pub fn render(&self) -> String {
         let mut out = String::from(HEADER);
         let iso = self.iso.as_ref().map(|p| p.display().to_string());
-        let entries: [(&str, Option<String>, &str); 8] = [
+        let entries: [(&str, Option<String>, &str); 12] = [
             ("iso", iso, "Caminho da imagem do disco (ISO/BIN). Vazio = procurar pelo iso_glob na pasta do jogo."),
             ("profile", self.profile.map(|p| p.key().into()), "Perfil: original | recommended | deck | custom (custom usa renderer/fps/vsync abaixo)."),
-            ("renderer", self.renderer.map(|r| r.key().into()), "Desenho: cpu (padrao, software) | d3d11 (experimental: so apresenta; desenho ainda na CPU)."),
+            ("renderer", self.renderer.map(|r| r.key().into()), "Desenho (PS2X_GS): cpu (padrao) | cpu-thread | d3d11 (backend ROV atual) | hw (por hardware, em desenvolvimento). PS2X_GS no ambiente vence."),
             ("fps", self.fps.map(|f| f.to_string()), "Limite de FPS: 30 | 50 | 60 | 0 (0 = ilimitado)."),
             ("deck_fps", self.deck_fps.map(|f| f.to_string()), "Limite do perfil Steam Deck: 30 | 40 | 60."),
             ("vsync", self.vsync.map(|b| bool_text(b).into()), "Sincronia vertical do Direct3D 11 (PS2X_GS_VSYNC): 0 | 1."),
             ("heartbeat", self.heartbeat.map(|b| bool_text(b).into()), "Diagnostico: uma linha por segundo no log do jogo (PS2X_HEARTBEAT): 0 | 1."),
+            ("internal_scale", self.internal_scale.map(|n| n.to_string()), "Resolucao interna do renderer hw (PS2X_GS_SCALE): 1..8 (padrao 1). Escala > 2 pede RAM >= 8 GiB e VRAM >= 4 GiB."),
+            ("crt", self.crt.map(|c| c.key().into()), "Filtro CRT (PS2X_POSTFX_CRT, _STRENGTH): off | suave | medio | forte."),
+            ("vfs_cache_mb", self.vfs_cache_mb.map(|n| n.to_string()), "Cache do VFS em MiB (PS2X_VFS_CACHE_MB): 0 desliga; comentado = automatico."),
+            ("widescreen", self.widescreen.map(|b| bool_text(b).into()), "Planejado (PS2X_WIDESCREEN): ainda sem efeito no runtime: 0 | 1."),
             ("show_window", self.show_window.map(|b| bool_text(b).into()), "1 = abrir esta janela ao iniciar; 0 = jogar direto (use --settings para reabrir)."),
         ];
         for (key, value, help) in entries {
@@ -216,7 +284,8 @@ impl Settings {
 }
 
 const HEADER: &str = "# launcher.cfg - preferencias do ps2launch (chave = valor; '#' comenta).\n\
-# Gerado pelo launcher; pode editar a mao. Flags de linha de comando vencem estes valores.\n\
+# Gerado pelo launcher; pode editar a mao. Precedencia: linha de comando > ambiente (PS2X_*) >\n\
+# este arquivo > game.toml.\n\
 # Chave comentada = usa o padrao.\n";
 
 fn default_text(key: &str) -> &'static str {
@@ -225,7 +294,10 @@ fn default_text(key: &str) -> &'static str {
         "renderer" => "cpu",
         "fps" => "60",
         "deck_fps" => "60",
-        "vsync" | "heartbeat" => "0",
+        "vsync" | "heartbeat" | "widescreen" => "0",
+        "internal_scale" => "1",
+        "crt" => "off",
+        "vfs_cache_mb" => "256",
         "show_window" => "1",
         _ => "",
     }
@@ -279,6 +351,10 @@ mod tests {
             deck_fps: Some(30),
             vsync: Some(true),
             heartbeat: Some(false),
+            internal_scale: Some(4),
+            crt: Some(Crt::Suave),
+            vfs_cache_mb: Some(512),
+            widescreen: Some(true),
             show_window: Some(true),
         };
         let (back, w) = Settings::parse(&s.render());
@@ -315,5 +391,26 @@ mod tests {
         let mut o = RunOptions::default();
         Settings::default().apply(&mut o);
         assert_eq!((o.fps, o.renderer, o.vsync), (None, None, None));
+    }
+
+    #[test]
+    fn new_keys_validate_and_apply() {
+        let (s, w) = Settings::parse("profile = custom\nrenderer = HW\ninternal_scale = 9\ncrt = forte\nvfs_cache_mb = 0\nwidescreen = 1\nrenderer2 = x\n");
+        assert_eq!(s.renderer, Some(Renderer::Hw));
+        assert_eq!(s.internal_scale, None); // fora da faixa: aviso, nao derruba
+        assert_eq!(w.len(), 2, "{w:?}");
+        let (s, _) = Settings::parse("profile = custom\nrenderer = cpu-thread\ninternal_scale = 3\ncrt = suave\n");
+        assert_eq!(s.renderer, Some(Renderer::CpuThread));
+        let mut o = RunOptions { internal_scale: Some(2), ..Default::default() }; // CLI vence
+        s.apply(&mut o);
+        assert_eq!(o.internal_scale, Some(2));
+        assert!(!o.from_cfg.contains("PS2X_GS_SCALE"));
+        assert_eq!(o.crt, Some(Crt::Suave));
+        assert!(o.from_cfg.contains("PS2X_POSTFX_CRT") && o.from_cfg.contains("PS2X_GS"));
+        // Perfil nao-custom ignora escala/crt, mas mantem o cache.
+        let (s, _) = Settings::parse("profile = recommended\ninternal_scale = 4\nvfs_cache_mb = 256\n");
+        let mut o = RunOptions::default();
+        s.apply(&mut o);
+        assert_eq!((o.internal_scale, o.vfs_cache_mb), (None, Some(256)));
     }
 }

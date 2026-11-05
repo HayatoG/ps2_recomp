@@ -45,9 +45,37 @@ target\release\ps2launch-gui.exe --game ..\ghost_pc --check    # valida dump + p
 ## `launcher.cfg`
 
 `<jogo>/launcher.cfg` (`chave = valor`, `#` comenta), gerado comentado na primeira execucao (CLI ou
-janela). Chaves: `iso`, `profile`, `renderer`, `fps`, `deck_fps`, `vsync`, `heartbeat`,
-`show_window`. Precedencia: flag do CLI (`--iso`, `--fps`, `--renderer`, `--vsync`, `--heartbeat`)
-> `launcher.cfg` > padrao do `game.toml`/runtime.
+janela). Chaves: `iso`, `profile`, `renderer`, `fps`, `deck_fps`, `vsync`, `heartbeat`, `internal_scale`,
+`crt`, `vfs_cache_mb`, `widescreen`, `show_window`.
+
+**Precedencia** (maior para menor): linha de comando > ambiente do processo (`PS2X_*` ja definidas)
+> `launcher.cfg` > `game.toml` (`[run].env`). So a linha de comando sobrescreve uma variavel que o
+usuario ja exportou; o cfg e o `game.toml` nunca a sobrescrevem (o log registra "ja definido no
+ambiente"). Perfis `original`/`recommended`/`deck` fixam renderer, fps e vsync (e ignoram
+`internal_scale`, `crt` e `widescreen`); `vfs_cache_mb` vale em qualquer perfil.
+
+| Opcao CLI | Chave do cfg | Variavel de ambiente | Valores |
+|---|---|---|---|
+| `--renderer R` | `renderer` | `PS2X_GS` | `cpu` (padrao), `cpu-thread`, `d3d11` (ROV atual), `hw` (em desenvolvimento) |
+| `--internal-scale N` | `internal_scale` | `PS2X_GS_SCALE` | inteiro 1..8 (padrao 1); resolucao interna do renderer `hw` |
+| `--crt [NIVEL]` | `crt` | `PS2X_POSTFX_CRT` (+ `_STRENGTH`) | `off`, `suave` (0.35), `medio` (0.65, padrao de `--crt` sem valor), `forte` (1.0); `off` exporta `PS2X_POSTFX_CRT=0`; a escala de `_STRENGTH` fica em `options::Crt::strength` |
+| `--vfs-cache-mb N` | `vfs_cache_mb` | `PS2X_VFS_CACHE_MB` | 0..16384 MiB; 0 desliga; ausente = automatico (nada exportado) |
+| `--widescreen` | `widescreen` | `PS2X_WIDESCREEN=1` | **planejado**: reservado, sem efeito no runtime ainda |
+| `--vsync` | `vsync` | `PS2X_GS_VSYNC` | so `d3d11` |
+| `--fps N` | `fps` | `PS2X_TARGET_FPS` | 0 = ilimitado |
+| `--heartbeat` | `heartbeat` | `PS2X_HEARTBEAT` | diagnostico |
+
+Valores invalidos na CLI sao erro (codigo 2, com a lista de valores aceitos); no cfg viram aviso e
+a chave e ignorada. Tudo que sera exportado e registrado no log (`opcoes de execucao: ...`).
+
+**Hardware** (`src/hw.rs`): `ps2launch info` e `run` registram RAM total/livre
+(`GlobalMemoryStatusEx`) e VRAM dedicada (PowerShell: registro do driver, com
+`Win32_VideoController` de reserva; so consultada em `info` ou quando `internal_scale > 2` /
+cache >= 1024 MiB, pois custa algumas centenas de ms). Avisa, sem bloquear, se RAM < 8 GiB ou
+VRAM < 4 GiB com escala > 2 ou cache grande. Sem DXGI para nao adicionar crates.
+
+GUI: aba Imagem ganhou os chips `CPU (thread)` e `Hardware`; escala, CRT e cache ainda so pelo
+`launcher.cfg`/CLI (pendente).
 
 Tabela de edicao: `[[dump.file]]` no `game.toml` (nome, tamanho, sha256). `verify` confere os tamanhos pelo diretorio da imagem (rapido); `verify --deep` confere os hashes; `hashes` imprime o bloco a partir do manifesto (para uma edicao nova). Edicao desconhecida ou imagem truncada e RECUSADA.
 

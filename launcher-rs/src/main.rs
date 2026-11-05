@@ -1,6 +1,7 @@
 //! CLI do launcher: `ps2launch <info|verify|extract|run> [--game DIR] [--iso ARQ] [opcoes]`.
+use ps2launch::options;
 use ps2launch::settings::{self, Settings};
-use ps2launch::{assets, config::GameConfig, dump, err, error, error::Result, info, log, run, warn};
+use ps2launch::{assets, config::GameConfig, dump, err, error, error::Result, hw, info, log, run, warn};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -28,7 +29,11 @@ OPCOES:
     --fps-log CSV     grava o FPS por segundo
     --shot-dir DIR    pasta dos PNG do comando 'shot' do pad virtual
     --missing-log ARQ registra alvos de desvio sem funcao gerada
-    --renderer R      desenho: cpu (padrao) ou d3d11 (experimental)
+    --renderer R      desenho (PS2X_GS): cpu (padrao) | cpu-thread | d3d11 | hw (em desenvolvimento)
+    --internal-scale N  resolucao interna do renderer hw, 1..8 (PS2X_GS_SCALE; padrao 1)
+    --crt [NIVEL]     filtro CRT: off | suave | medio | forte (sem NIVEL = medio)
+    --vfs-cache-mb N  cache do VFS em MiB (PS2X_VFS_CACHE_MB; 0 desliga; ausente = automatico)
+    --widescreen      reservado (PS2X_WIDESCREEN=1): planejado, ainda sem efeito
     --vsync           sincronia vertical do d3d11
     --heartbeat       uma linha por segundo com o estado do guest (diagnostico)
     --peek 0xA,0xB    enderecos do guest no heartbeat
@@ -37,7 +42,8 @@ OPCOES:
 
 PREFERENCIAS:
     <jogo>/launcher.cfg (chave = valor), gerado comentado na primeira execucao e editado pela
-    janela (ps2launch-gui). Flags desta linha de comando vencem o arquivo.
+    janela (ps2launch-gui). Precedencia: linha de comando > ambiente (variaveis PS2X_* ja
+    definidas) > launcher.cfg > game.toml.
 ";
 
 struct Cli {
@@ -54,7 +60,7 @@ fn next_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<Str
 }
 
 fn parse(argv: Vec<String>) -> Result<Option<Cli>> {
-    let mut it = argv.into_iter();
+    let mut it = argv.into_iter().peekable();
     let mut cli = Cli {
         command: String::new(),
         game: PathBuf::from("."),
@@ -76,11 +82,15 @@ fn parse(argv: Vec<String>) -> Result<Option<Cli>> {
             "--shot-dir" => cli.run.shot_dir = Some(next_value(&mut it, &a)?),
             "--missing-log" => cli.run.missing_log = Some(next_value(&mut it, &a)?),
             "--heartbeat" => cli.run.heartbeat = true,
-            "--renderer" => {
-                let v = next_value(&mut it, &a)?.to_ascii_lowercase();
-                settings::Renderer::parse(&v).ok_or_else(|| err!("--renderer espera cpu ou d3d11"))?;
-                cli.run.renderer = Some(v);
+            "--renderer" => cli.run.renderer = Some(options::validate_renderer(&next_value(&mut it, &a)?)?),
+            "--internal-scale" => cli.run.internal_scale = Some(options::parse_scale(&next_value(&mut it, &a)?)?),
+            "--crt" => {
+                // Valor opcional: so consome o proximo argumento se for um nivel valido.
+                let level = it.next_if(|n| options::Crt::parse(n).is_some());
+                cli.run.crt = Some(level.map_or(Ok(options::Crt::Medio), |l| options::parse_crt(&l))?);
             }
+            "--vfs-cache-mb" => cli.run.vfs_cache_mb = Some(options::parse_cache_mb(&next_value(&mut it, &a)?)?),
+            "--widescreen" => cli.run.widescreen = true,
             "--vsync" => cli.run.vsync = Some(true),
             "--peek" => cli.run.peek = Some(next_value(&mut it, &a)?),
             "--timeout" => cli.run.timeout_secs = Some(next_value(&mut it, &a)?.parse().map_err(|_| err!("--timeout espera um numero"))?),
@@ -105,6 +115,7 @@ fn execute(cli: Cli) -> Result<i32> {
     info!("jogo: {} ({})", cfg.name, cfg.serial);
     if cli.command == "info" {
         info!("work={} extrair={:?} executavel={:?}", cfg.work_dir.display(), cfg.extract_files, cfg.run_executable);
+        info!("hardware: {}", hw::detect(true).summary());
         return Ok(0);
     }
     if cli.command == "hashes" {
@@ -139,8 +150,19 @@ fn execute(cli: Cli) -> Result<i32> {
         }
         _ => {
             assets::extract(&cfg, &iso, cli.force)?;
+            report_hardware(&cli.run);
             run::run(&cfg, &cli.run)
         }
+    }
+}
+
+/// Registra RAM/VRAM e avisa (sem bloquear) se a escala ou o cache pedirem mais que o disponivel.
+fn report_hardware(o: &run::RunOptions) {
+    let heavy = o.internal_scale.is_some_and(|s| s > 2) || o.vfs_cache_mb.is_some_and(|c| c >= options::CACHE_LARGE_MB);
+    let h = hw::detect(heavy);
+    info!("hardware: {}", h.summary());
+    for w in h.warnings(o.internal_scale, o.vfs_cache_mb) {
+        warn!("{w}");
     }
 }
 
@@ -162,5 +184,39 @@ fn main() -> ExitCode {
             error!("{e}");
             ExitCode::from(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn p(a: &[&str]) -> Result<Option<Cli>> {
+        parse(a.iter().map(|s| s.to_string()).collect())
+    }
+
+    #[test]
+    fn parses_new_options() {
+        let c = p(&["run", "--renderer", "HW", "--internal-scale", "4", "--crt", "forte", "--vfs-cache-mb", "0", "--widescreen"]).unwrap().unwrap();
+        assert_eq!(c.run.renderer.as_deref(), Some("hw"));
+        assert_eq!(c.run.internal_scale, Some(4));
+        assert_eq!(c.run.crt, Some(options::Crt::Forte));
+        assert_eq!(c.run.vfs_cache_mb, Some(0));
+        assert!(c.run.widescreen);
+    }
+
+    #[test]
+    fn crt_value_is_optional() {
+        let c = p(&["--crt", "run"]).unwrap().unwrap();
+        assert_eq!((c.run.crt, c.command.as_str()), (Some(options::Crt::Medio), "run"));
+        assert!(p(&["run", "--crt"]).unwrap().unwrap().run.crt == Some(options::Crt::Medio));
+    }
+
+    #[test]
+    fn rejects_bad_values() {
+        assert!(p(&["run", "--renderer", "vulkan"]).is_err());
+        assert!(p(&["run", "--internal-scale", "0"]).is_err());
+        assert!(p(&["run", "--internal-scale", "9"]).is_err());
+        assert!(p(&["run", "--vfs-cache-mb", "x"]).is_err());
     }
 }

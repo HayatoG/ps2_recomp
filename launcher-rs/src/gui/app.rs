@@ -488,7 +488,9 @@ impl App {
         }
         let opts = [
             Chip { value: R::Real(Renderer::Cpu), label: s.renderer_cpu, badge: None, disabled: None },
+            Chip { value: R::Real(Renderer::CpuThread), label: s.renderer_cpu_thread, badge: Some(s.badge_experimental), disabled: None },
             Chip { value: R::Real(Renderer::D3d11), label: s.renderer_d3d11, badge: Some(s.badge_experimental), disabled: None },
+            Chip { value: R::Real(Renderer::Hw), label: s.renderer_hw, badge: Some(s.badge_experimental), disabled: None },
             Chip { value: R::Soon, label: s.renderer_vulkan, badge: Some(s.badge_soon), disabled: Some(s.soon_reason) },
             Chip { value: R::Soon, label: s.renderer_d3d12, badge: Some(s.badge_soon), disabled: Some(s.soon_reason) },
         ];
