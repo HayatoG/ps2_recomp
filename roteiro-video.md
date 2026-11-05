@@ -464,3 +464,13 @@ Medir só o primeiro engana: você pode apresentar 200 imagens por segundo e o j
 **7. Ideias futuras (nada feito).** Widescreen (exige patch da projeção do jogo) e 4K com hacks pontuais; texturas HD por substituição por hash no upload, na RAM do host; D3D12 e Vulkan sobre a RHI. O launcher já tem as opções (`--renderer hw`, `--internal-scale`, `--crt`, `--vfs-cache-mb`), e `--widescreen` existe como planejado, sem efeito.
 
 **O que eu levo desta rodada.** Primeiro, baratear o ciclo de feedback multiplica todo o resto. Segundo, um oráculo lento e exato (o interpretador antigo, o rasterizador de CPU) é o que permite ousar na versão rápida com replay e PSNR. Terceiro, fiel não é rápido, e o resultado nulo do cache vale o mesmo espaço no vídeo que o 4x do VU1.
+
+## Rodada 11: a medição final, e duas ideias que não funcionaram
+
+**Resultado.** Medi de novo com o executável construído depois de todas as mudanças, máquina parada, mesma janela da cena 3D: baseline 2,96, CPU serial 8,74, CPU em faixas 22,59, hardware serial 25,07, hardware com thread própria 28,3 vsync/s (esse último na janela 7530-7620, porque a corrida terminou antes de 7640). Dá cerca de 9,6x, e ainda faltam ~1,8x para os 50. Uma corrida por configuração, então ±10%. [mostrar o gráfico fps-gameplay]
+
+**Erro 1: o timer do Windows.** Suspeitei que as esperas curtas fossem arredondadas para 15,6 ms e que isso explicasse os ~168 ms fixos por vsync quando o VU1 roda em thread própria. Pedi 1 ms com `timeBeginPeriod`. Nada mudou (4,3 vsync/s), então deixei como opção desligada. Lição: hipótese plausível não é causa; sem ETW (traço de eventos do Windows) é chute.
+
+**Erro 2: thread do VU1.** Separar o VU1 em thread deixou o jogo mais lento (4,3 contra ~25), porque o EE espera o VU1 a cada pacote. O PCSX2 evita isso fazendo o EE entregar o PATH1 direto ao GS e só esperar com a fila cheia. Isso é a próxima grande ideia (comparação em `ghost_pc/docs/pcsx2-comparison.md`).
+
+**Armadilha de build.** Reconfigurar o CMake pelo PowerShell gravou o prefixo de dependências em UTF-8, o ninja deixou de ver os headers e eu quase fiz um rebuild de 12 min. Configurar só pelo cmd.exe. Foi um erro meu, e consegui desfazer editando o `rules.ninja`.
