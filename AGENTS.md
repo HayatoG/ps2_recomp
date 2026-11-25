@@ -25,7 +25,7 @@ Instruções para agentes de IA (e humanos). Ao trabalhar em um jogo, leia este 
 
 1. **Sempre dar `git pull`/`git fetch` nas branches remotas** antes de começar a trabalhar e antes de qualquer push.
 2. **Nunca commitar `refs.txt`, nem qualquer arquivo com direitos autorais** (ISO, ELF extraído, `.BIN`, vídeos, áudio, texturas, modelos, dumps de memória, binários originais, assets convertidos, saves). Se houver dúvida, não commite e pergunte.
-3. **Visibilidade decidida pelo usuário.** `ps2_recomp` foi tornado público pelo usuário (24/11/2026); os repositórios de cada jogo continuam privados até segunda ordem. Não mudar visibilidade de nenhum repositório sem autorização explícita.
+3. **Visibilidade decidida pelo usuário.** `ps2_recomp`, `ghost_pc` e `AutoModellista-Recompiled` foram tornados públicos pelo usuário (24/11/2026). Não mudar visibilidade de nenhum repositório sem autorização explícita.
 4. **Sempre exigir o dump original do jogo.** O build/launcher deve recusar rodar sem o dump do usuário (verificar presença e, quando possível, hash/serial). Nunca embutir nem baixar assets do jogo.
 5. **Launcher simples, mas funcional, fora do jogo**: programa separado que localiza/valida o dump, extrai/converte os assets necessários para um diretório local ignorado pelo git e inicia o port.
 6. **Sempre ter logs exportáveis e legíveis**: todo programa e script grava logs em `logs/` (do jogo em questão), texto simples ou JSON lines, com timestamp e nível. Logs ficam fora do git.
