@@ -1,5 +1,7 @@
 # Architecture
 
+> **Estudo de caso / Case study.** PT-BR: projeto de estudo pessoal; o desenvolvimento só continua no meu tempo disponível, quando possível (sem prazos nem garantia de conclusão). EN: personal case study; development only continues in my available time, when possible (no deadlines, no guarantee of completion). Ver/see `README.md`.
+
 Como este projeto roda um jogo de PlayStation 2 no PC: uma seção por peça do hardware ou da
 biblioteca Sony que o jogo usava, dizendo o que a substitui no host e onde está esse código.
 Comece por aqui; `LEGAL.md`, `tools.md` e `similar-projects.md` aprofundam outros pontos. O

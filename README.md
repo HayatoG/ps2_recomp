@@ -1,10 +1,16 @@
 # ps2_recomp
 
+> **Estudo de caso / Case study**
+>
+> **PT-BR:** este projeto é apenas um estudo de caso, uma pesquisa pessoal sobre recompilação estática e engenharia reversa, e não um produto. O desenvolvimento só continuará no meu tempo disponível, quando possível: sem prazos, sem garantia de conclusão e sem suporte.
+>
+> **EN:** this project is only a case study, personal research into static recompilation and reverse engineering, not a product. Development will only continue in my available time, when possible: no deadlines, no guarantee of completion and no support.
+
 > Repositório `HayatoG/ps2_recomp` (a pasta local se chama `ps2decomp`). Não confundir com o **PS2Recomp** de terceiros (ran-j, GPL-3.0), que usamos como ferramenta em `third_party/`.
 
 Base genérica de ferramentas, regras e método para **decompilar e portar jogos de PS2 para PC** (recompilação estática do MIPS R5900 + runtime). Cada jogo vive em **seu próprio repositório** dentro de uma pasta com o mesmo nome (ex.: `ghost_pc/`, que não é versionada aqui).
 
-> **Repositório privado.** Não contém jogo algum: nenhum ISO, ELF, texturas, áudio ou vídeo. O projeto exige o **dump original do próprio usuário** e valida serial e hash antes de rodar.
+> **Repositório público.** Não contém jogo algum: nenhum ISO, ELF, texturas, áudio ou vídeo. O projeto exige o **dump original do próprio usuário** e valida serial e hash antes de rodar.
 
 ## Conteúdo
 | Pasta/arquivo | O quê |

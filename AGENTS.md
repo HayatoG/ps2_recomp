@@ -1,6 +1,8 @@
 # AGENTS.md — ps2_recomp (base)
 
-> Repositórios (privados, conta `HayatoG`): base genérica = `ps2_recomp` (pasta local `ps2decomp`); cada jogo em repositório próprio (ex.: `ghost_pc`, ignorado pelo repo da base). Regra 12: commits sem atribuição ao Claude.
+> **Estudo de caso / Case study:** o projeto é só um estudo de caso, desenvolvido no tempo disponível do autor, quando possível. Manter o aviso bilíngue (PT-BR/EN) no topo do `README.md` e dos docs principais. / The project is only a case study, developed in the author's available time, when possible. Keep the bilingual notice at the top of `README.md` and the main docs.
+
+> Repositórios (conta `HayatoG`): base genérica = `ps2_recomp` (pasta local `ps2decomp`, **público**); cada jogo em repositório próprio (ex.: `ghost_pc`, ignorado pelo repo da base). Regra 12: commits sem atribuição ao Claude.
 
 Base de ferramentas, regras e método para decompilar/portar jogos de **PS2 para PC**. A raiz **não contém nenhum jogo**: cada jogo vive em seu próprio diretório (`ghost_pc/`, e outros que o usuário quiser adicionar), com seu próprio `AGENTS.md`.
 
@@ -23,7 +25,7 @@ Instruções para agentes de IA (e humanos). Ao trabalhar em um jogo, leia este 
 
 1. **Sempre dar `git pull`/`git fetch` nas branches remotas** antes de começar a trabalhar e antes de qualquer push.
 2. **Nunca commitar `refs.txt`, nem qualquer arquivo com direitos autorais** (ISO, ELF extraído, `.BIN`, vídeos, áudio, texturas, modelos, dumps de memória, binários originais, assets convertidos, saves). Se houver dúvida, não commite e pergunte.
-3. **O repositório permanece privado até segunda ordem.** Não publicar, não mudar visibilidade, não criar remoto público.
+3. **Visibilidade decidida pelo usuário.** `ps2_recomp` foi tornado público pelo usuário (24/11/2026); os repositórios de cada jogo continuam privados até segunda ordem. Não mudar visibilidade de nenhum repositório sem autorização explícita.
 4. **Sempre exigir o dump original do jogo.** O build/launcher deve recusar rodar sem o dump do usuário (verificar presença e, quando possível, hash/serial). Nunca embutir nem baixar assets do jogo.
 5. **Launcher simples, mas funcional, fora do jogo**: programa separado que localiza/valida o dump, extrai/converte os assets necessários para um diretório local ignorado pelo git e inicia o port.
 6. **Sempre ter logs exportáveis e legíveis**: todo programa e script grava logs em `logs/` (do jogo em questão), texto simples ou JSON lines, com timestamp e nível. Logs ficam fora do git.
@@ -123,4 +125,4 @@ Outras sessões de agentes (outros jogos/projetos) podem usar a mesma máquina. 
 - [x] Levantamento de projetos similares (`docs/similar-projects.md`).
 - [ ] Decidir estratégia do port (recompilação estática vs decomp manual) após spike do PS2Recomp.
 - [x] Launcher genérico (`launcher/ps2launcher.py` + `<jogo>/game.toml`) com validação de dump e logs (regras 4–6). Falta o comando `assets` (conversão) e ligar o `[run]` ao runtime.
-- [ ] Criar remoto **privado** (somente com autorização explícita do usuário).
+- [x] Remoto criado (`HayatoG/ps2_recomp`), público desde 24/11/2026 por decisão do usuário.
